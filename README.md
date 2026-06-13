@@ -15,6 +15,9 @@ Flows, end to end:
    screenshots), uploads to Walrus, and calls `submit_scan` with the blob ids.
 3. **Get paid + render** — the node receives its portion of the bounty; the
    requester's page renders the Walrus screenshots as they arrive.
+4. **CRE verify (Terminal C)** — an independent verifier re-fetches Walrus evidence,
+   enforces a privacy policy, checks URL/HTML integrity, and writes verdicts the
+   UI displays as **CRE verified** badges.
 
 ## Stack
 
@@ -26,6 +29,8 @@ Flows, end to end:
   (`scripts/scanner-node.ts`).
 - **Walrus** testnet publisher/aggregator for evidence storage
   (`src/lib/walrus.ts`).
+- **CRE vetting** — Terminal C verifier (`pnpm verify`) + optional Chainlink CRE
+  workflow in `../cre-vetting/` (see [cre-vetting/README.md](../cre-vetting/README.md)).
 
 ## Deployed (Sui testnet)
 
@@ -71,18 +76,42 @@ device profile so screenshots vary:
 # one-time: export your CLI key (any funded testnet key works)
 export SUI_SECRET_KEY="$(sui keytool export --key-identity $(sui client active-address) --json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).exportedPrivateKey))')"
 
-# terminal A
+# terminal A — desktop scanner
 SCANNER_PROFILE=desktop pnpm scan
-# terminal B
+# terminal B — iphone scanner (varied screenshot)
 SCANNER_PROFILE=iphone  pnpm scan
-# terminal C
-SCANNER_PROFILE=android pnpm scan
 ```
 
 Each node polls the `Market`, scans every open job once, uploads to Walrus, and
 submits — filling one slot per job. Env knobs: `SCANNER_PROFILE`
 (`desktop`/`iphone`/`android`), `POLL_MS`, `SCAN_PKG`, `SCAN_MARKET`, `SUI_RPC`,
 `WALRUS_PUBLISHER`.
+
+Policy-denied URLs (Instagram, Facebook, etc.) are skipped by scanner nodes.
+
+## 3) Terminal C — CRE verifier (badges in UI)
+
+Run this in a **separate terminal** while the dev server is up. It polls Sui,
+re-fetches each submission from Walrus, and writes `public/cre-verdicts.json`
+for the UI (badges flip to **CRE verified** / **rejected**):
+
+```bash
+pnpm verify          # poll every 8s
+pnpm verify:once     # single pass (good for testing)
+```
+
+No wallet key needed — Terminal C only reads chain + Walrus.
+
+### Full demo (4 terminals)
+
+| Terminal | Command |
+|----------|---------|
+| Web | `pnpm dev` |
+| Scanner desktop | `SUI_SECRET_KEY=… SCANNER_PROFILE=desktop pnpm scan` |
+| Scanner iphone | `SUI_SECRET_KEY=… SCANNER_PROFILE=iphone pnpm scan` |
+| **CRE verify** | `pnpm verify` |
+
+Optional: Chainlink CRE CLI simulate — see `../cre-vetting/README.md`.
 
 CLI fallback (manual submission with placeholder blobs):
 

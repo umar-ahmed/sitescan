@@ -8,9 +8,11 @@ import { Transaction } from "@mysten/sui/transactions";
 import { cancelJob } from "./contracts/scan_market/scan_market";
 import { mistToSui, useScanConfig } from "./lib/config";
 import { walrusAggregatorUrl } from "./lib/walrus";
+import { useCreVerdicts, verdictForJob } from "./lib/useCreVerdicts";
+import type { JobVerdict, VerdictStatus } from "./lib/vetting";
 import { Button } from "./components/ui/button";
 import { Card, CardContent } from "./components/ui/card";
-import { Globe, CheckCircle2, XCircle, Loader2 } from "lucide-react";
+import { Globe, CheckCircle2, XCircle, Loader2, ShieldCheck, ShieldX } from "lucide-react";
 
 export interface Submission {
   worker: string;
@@ -58,6 +60,8 @@ export function JobCard({ job }: { job: Job }) {
   const dAppKit = useDAppKit();
   const queryClient = useQueryClient();
   const { packageId } = useScanConfig();
+  const creVerdicts = useCreVerdicts();
+  const creVerdict = verdictForJob(creVerdicts, job.id);
 
   const isRequester = account?.address === job.requester;
   const rewardSui = mistToSui(BigInt(job.reward_total));
@@ -105,13 +109,30 @@ export function JobCard({ job }: { job: Job }) {
           <div className="text-right shrink-0">
             <div className="font-semibold tabular-nums">{rewardSui} SUI</div>
             <StatusBadge status={job.status} filled={filled} wanted={wanted} />
+            <CreVerdictBadge verdict={creVerdict} hasSubmissions={filled > 0} />
           </div>
         </div>
+
+        {creVerdict?.cloakingDelta && filled > 1 && (
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            Cloaking delta: {creVerdict.cloakingDelta.detail}
+          </div>
+        )}
+
+        {creVerdict?.status === "REJECTED_POLICY" && (
+          <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+            {creVerdict.reason}
+          </div>
+        )}
 
         {filled > 0 && (
           <div className="grid grid-cols-2 gap-2">
             {job.submissions.map((s, i) => (
-              <SubmissionTile key={i} submission={s} />
+              <SubmissionTile
+                key={i}
+                submission={s}
+                submissionVerdict={creVerdict?.submissions[i]}
+              />
             ))}
           </div>
         )}
@@ -144,7 +165,13 @@ export function JobCard({ job }: { job: Job }) {
   );
 }
 
-function SubmissionTile({ submission }: { submission: Submission }) {
+function SubmissionTile({
+  submission,
+  submissionVerdict,
+}: {
+  submission: Submission;
+  submissionVerdict?: { status: VerdictStatus; reason?: string };
+}) {
   const imgUrl = walrusAggregatorUrl(submission.screenshot_blob_id);
   const htmlUrl = walrusAggregatorUrl(submission.html_blob_id);
   return (
@@ -161,6 +188,9 @@ function SubmissionTile({ submission }: { submission: Submission }) {
         <div className="tabular-nums">
           earned {mistToSui(BigInt(submission.paid))} SUI
         </div>
+        {submissionVerdict && (
+          <CreSubmissionBadge status={submissionVerdict.status} />
+        )}
         <div className="flex gap-2">
           <a
             href={imgUrl}
@@ -184,6 +214,66 @@ function SubmissionTile({ submission }: { submission: Submission }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function CreVerdictBadge({
+  verdict,
+  hasSubmissions,
+}: {
+  verdict?: JobVerdict;
+  hasSubmissions: boolean;
+}) {
+  if (!hasSubmissions) return null;
+  if (!verdict) {
+    return (
+      <div className="mt-1 flex items-center justify-end gap-1 text-xs text-muted-foreground">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        CRE pending
+      </div>
+    );
+  }
+  if (verdict.status === "VERIFIED") {
+    return (
+      <div className="mt-1 flex items-center justify-end gap-1 text-xs text-emerald-700">
+        <ShieldCheck className="h-3 w-3" />
+        CRE verified
+      </div>
+    );
+  }
+  if (verdict.status === "REJECTED_POLICY") {
+    return (
+      <div className="mt-1 flex items-center justify-end gap-1 text-xs text-red-700">
+        <ShieldX className="h-3 w-3" />
+        CRE rejected (policy)
+      </div>
+    );
+  }
+  if (verdict.status === "REJECTED_FAKE") {
+    return (
+      <div className="mt-1 flex items-center justify-end gap-1 text-xs text-red-700">
+        <ShieldX className="h-3 w-3" />
+        CRE rejected (fake evidence)
+      </div>
+    );
+  }
+  return null;
+}
+
+function CreSubmissionBadge({ status }: { status: VerdictStatus }) {
+  if (status === "VERIFIED") {
+    return (
+      <span className="inline-flex items-center gap-1 text-emerald-700">
+        <ShieldCheck className="h-3 w-3" />
+        verified
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 text-red-700">
+      <ShieldX className="h-3 w-3" />
+      rejected
+    </span>
   );
 }
 

@@ -39,6 +39,10 @@ function App() {
                 <h2 className="mb-2 px-1 text-sm font-medium text-muted-foreground">
                   Your jobs &amp; incoming scans
                 </h2>
+                <p className="mb-2 px-1 text-xs text-muted-foreground">
+                  Run Terminal C (<code className="text-foreground">pnpm verify</code>
+                  ) in another window for CRE verified badges.
+                </p>
                 <JobBoard />
               </div>
             </>

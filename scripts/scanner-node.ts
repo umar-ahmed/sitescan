@@ -16,6 +16,7 @@ import {
   submitScan,
 } from "../src/contracts/scan_market/scan_market";
 import { uploadToWalrus } from "../src/lib/walrus";
+import { checkPolicy } from "../src/lib/vetting";
 
 const PKG =
   process.env.SCAN_PKG ??
@@ -224,6 +225,11 @@ async function main() {
           continue;
         }
         handled.add(jobId);
+        const policy = checkPolicy(claim.url);
+        if (!policy.allowed) {
+          console.log(`  skipping policy-denied URL: ${claim.url} (${policy.reason})`);
+          continue;
+        }
         console.log(`\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`);
         const { screenshot, html } = await capture(browser, claim.url);
         const ssBlob = await uploadToWalrus(screenshot, {
