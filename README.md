@@ -1,138 +1,120 @@
-# Sui dApp Starter Template
+# Proof of Scan — scan-market (Sui + Walrus POC)
 
-This dApp was created using `@mysten/create-dapp` that sets up a basic React
-Client dApp using the following tools:
+A decentralized URL scan marketplace on Sui. A requester escrows a SUI reward
+against a target URL and a desired vantage (geo / device / browser) and asks for
+N independent scans. **Terminal scanner nodes** listen for open jobs, render the
+page in a headless browser, upload the screenshot + HTML to **Walrus**, and
+submit the resulting blob ids on-chain. Each submission is paid an equal portion
+of the reward; when all slots fill, the job completes. The requester sees every
+incoming screenshot rendered from Walrus on their page.
 
-- [React](https://react.dev/) as the UI framework
-- [TypeScript](https://www.typescriptlang.org/) for type checking
-- [Vite](https://vitejs.dev/) for build tooling
-- [Tailwind CSS v4](https://tailwindcss.com/) for styling
-- [Lucide React](https://lucide.dev/) for icons
-- [`@mysten/dapp-kit-react`](https://sdk.mystenlabs.com/dapp-kit) for connecting
-  to wallets and loading data
-- [`@mysten/codegen`](https://sdk.mystenlabs.com/codegen) for generating
-  TypeScript bindings from Move code
-- [pnpm](https://pnpm.io/) for package management
+Flows, end to end:
 
-For a full guide on how to build this dApp from scratch, visit this
-[guide](http://docs.sui.io/guides/developer/app-examples/e2e-counter#frontend).
+1. **Post a job** — requester escrows SUI for `scans` slots (web or CLI).
+2. **Scan** — each scanner node captures the page (device profile → varied
+   screenshots), uploads to Walrus, and calls `submit_scan` with the blob ids.
+3. **Get paid + render** — the node receives its portion of the bounty; the
+   requester's page renders the Walrus screenshots as they arrive.
 
-## Project Structure
+## Stack
 
-```
-src/
-├── components/ui/     # Reusable UI components (Button, Card)
-├── contracts/         # Generated TypeScript bindings (via codegen)
-├── lib/utils.ts       # Utility functions (cn for classnames)
-├── App.tsx            # Main application component
-├── Counter.tsx        # Counter display and controls
-├── CreateCounter.tsx  # Counter creation component
-├── dApp-kit.ts        # dApp Kit configuration
-├── constants.ts       # Package IDs per network
-└── index.css          # Tailwind CSS with theme variables
-```
+- **Sui Move** (`move/scan_market`) — escrow, job registry, per-submission
+  payout.
+- **@mysten/dapp-kit-react** + generated TS bindings (`pnpm codegen`).
+- **React + Vite + Tailwind** frontend (requester view).
+- **Playwright** headless capture in the scanner node
+  (`scripts/scanner-node.ts`).
+- **Walrus** testnet publisher/aggregator for evidence storage
+  (`src/lib/walrus.ts`).
 
-## Deploying your Move code
+## Deployed (Sui testnet)
 
-### Install Sui cli
+- Package: `0x3bf1b39719b8c0b263d65d21196b04b2ff6567f9b0b3279dffed05c9bbc6b792`
+- Market (shared object):
+  `0x18ab02a8ff7f2290080452d3b5a5c1d338ea995f54b58f767e44048a831c9cd7`
 
-Before deploying your move code, ensure that you have installed the Sui CLI. You
-can follow the [Sui installation instruction](https://docs.sui.io/build/install)
-to get everything set up.
+## Prerequisites
 
-This template uses `testnet` by default, so we'll need to set up a testnet
-environment in the CLI:
+- Node 18+, `pnpm`
+- Sui CLI (`brew install sui`), configured for testnet
+- A funded testnet address. Fund via the web faucet:
+  `https://faucet.sui.io/?network=testnet` (paste your
+  `sui client active-address`).
+- Playwright Chromium (one-time): `pnpm exec playwright install chromium`
 
-```bash
-sui client new-env --alias testnet --rpc https://fullnode.testnet.sui.io:443
-sui client switch --env testnet
-```
+## 1) Requester — post a job
 
-If you haven't set up an address in the sui client yet, you can use the
-following command to get a new address:
-
-```bash
-sui client new-address secp256k1
-```
-
-This well generate a new address and recover phrase for you. You can mark a
-newly created address as you active address by running the following command
-with your new address:
-
-```bash
-sui client switch --address 0xYOUR_ADDRESS...
-```
-
-We can ensure we have some Sui in our new wallet by requesting Sui from the
-faucet `https://faucet.sui.io`.
-
-### Publishing the move package
-
-The move code for this template is located in the `move` directory. To publish
-it, you can enter the `move` directory, and publish it with the Sui CLI:
-
-```bash
-cd move
-sui client publish --gas-budget 100000000 counter
-```
-
-In the output there will be an object with a `"packageId"` property. You'll want
-to save that package ID to the `src/constants.ts` file:
-
-```ts
-export const TESTNET_COUNTER_PACKAGE_ID = "<YOUR_PACKAGE_ID>";
-```
-
-The package ID is mapped to the local package name `@local-pkg/counter` in
-`src/dApp-kit.ts` via MVR overrides. This allows the generated TypeScript
-bindings to resolve the package address automatically.
-
-### Generating TypeScript bindings
-
-After publishing your Move code, generate the TypeScript bindings:
-
-```bash
-pnpm codegen
-```
-
-This generates type-safe functions and BCS types in `src/contracts/` based on
-your Move modules.
-
-Now that we have published the move code, updated the package ID, and generated
-the TypeScript bindings, we can start the app.
-
-## Starting your dApp
-
-To install dependencies you can run
+Web:
 
 ```bash
 pnpm install
+pnpm dev   # http://localhost:5173
 ```
 
-To start your dApp in development mode run
+Connect a Sui **testnet** wallet (the dev build also exposes a burner wallet),
+set the URL + vantage + reward + **scans wanted**, and post the job. Incoming
+scans render on the same page as scanner nodes complete them.
+
+Or via CLI (prints the new job id on stdout):
 
 ```bash
-pnpm dev
+# <url> <reward_sui> <scans> [geo] [device] [browser]
+./scripts/post-job.sh "https://example.com" 0.04 2 US desktop chrome
 ```
 
-## Building
+## 2) Scanner node — listen, capture, earn
 
-To build your app for deployment you can run
+Each terminal you run is a scanner node. Give it a Sui key to sign with and a
+device profile so screenshots vary:
 
 ```bash
-pnpm build
+# one-time: export your CLI key (any funded testnet key works)
+export SUI_SECRET_KEY="$(sui keytool export --key-identity $(sui client active-address) --json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).exportedPrivateKey))')"
+
+# terminal A
+SCANNER_PROFILE=desktop pnpm scan
+# terminal B
+SCANNER_PROFILE=iphone  pnpm scan
+# terminal C
+SCANNER_PROFILE=android pnpm scan
 ```
 
-## Customizing the UI
+Each node polls the `Market`, scans every open job once, uploads to Walrus, and
+submits — filling one slot per job. Env knobs: `SCANNER_PROFILE`
+(`desktop`/`iphone`/`android`), `POLL_MS`, `SCAN_PKG`, `SCAN_MARKET`, `SUI_RPC`,
+`WALRUS_PUBLISHER`.
 
-This template uses [Tailwind CSS v4](https://tailwindcss.com/docs) for styling
-with [shadcn/ui](https://ui.shadcn.com/)-style components. The UI components in
-`src/components/ui/` are based on shadcn/ui patterns and can be customized or
-extended.
+CLI fallback (manual submission with placeholder blobs):
 
-To add more shadcn/ui components, you can copy them from the
-[shadcn/ui components](https://ui.shadcn.com/docs/components) documentation and
-adapt them to work with your project.
+```bash
+./scripts/submit-scan.sh <job_id> [screenshot_blob_id] [html_blob_id]
+```
 
-Theme variables are defined in `src/index.css` using Tailwind's `@theme`
-directive.
+## Other CLI
+
+```bash
+./scripts/list-jobs.sh            # every job, slots filled, and each submission
+./scripts/cancel-job.sh <job_id>  # requester refund of remaining escrow
+```
+
+## Redeploy the contract
+
+```bash
+rm -f move/scan_market/Published.toml   # allow a fresh publish
+sui client publish --gas-budget 200000000 move/scan_market
+# then update src/constants.ts + scripts/env.sh with the new package + Market ids,
+# and regenerate bindings:
+node_modules/.bin/sui-ts-codegen generate
+```
+
+## Move module
+
+`move/scan_market/sources/scan_market.move`
+
+- `post_job(market, reward: Coin<SUI>, url, params, max_submissions)` — escrows
+  the reward, shares a `ScanJob`, registers it in the `Market`.
+- `submit_scan(job, screenshot_blob_id, html_blob_id)` — pays an equal portion
+  of the reward, records the submission; completes the job on the final slot.
+- `cancel_job(job)` — requester-only refund of the remaining escrow.
+
+Emits `JobPosted` / `ScanSubmitted` / `JobCompleted` events.
