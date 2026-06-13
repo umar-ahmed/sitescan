@@ -4,8 +4,8 @@ const config: SuiCodegenConfig = {
   output: "./src/contracts",
   packages: [
     {
-      package: "@local-pkg/counter",
-      path: "./move/counter",
+      package: "@local-pkg/scan_market",
+      path: "./move/scan_market",
     },
   ],
 };
