@@ -1,0 +1,7 @@
+name = "phishing-site-worker"
+main = "worker.ts"
+compatibility_date = "2024-01-01"
+
+routes = [
+  { pattern = "phishing.site", custom_domain = true }
+]
