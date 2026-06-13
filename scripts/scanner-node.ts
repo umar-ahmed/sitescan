@@ -17,13 +17,13 @@ import {
 } from "../src/contracts/scan_market/scan_market";
 import { uploadToWalrus } from "../src/lib/walrus";
 import { checkPolicy } from "../src/lib/vetting";
+import {
+  TESTNET_SCAN_MARKET_PACKAGE_ID,
+  TESTNET_MARKET_ID,
+} from "../src/constants";
 
-const PKG =
-  process.env.SCAN_PKG ??
-  "0x3bf1b39719b8c0b263d65d21196b04b2ff6567f9b0b3279dffed05c9bbc6b792";
-const MARKET =
-  process.env.SCAN_MARKET ??
-  "0x18ab02a8ff7f2290080452d3b5a5c1d338ea995f54b58f767e44048a831c9cd7";
+const PKG = process.env.SCAN_PKG ?? TESTNET_SCAN_MARKET_PACKAGE_ID!;
+const MARKET = process.env.SCAN_MARKET ?? TESTNET_MARKET_ID!;
 const RPC = process.env.SUI_RPC ?? "https://fullnode.testnet.sui.io:443";
 const WALRUS_PUBLISHER = process.env.WALRUS_PUBLISHER;
 const POLL_MS = Number(process.env.POLL_MS ?? 4000);
@@ -244,7 +244,7 @@ async function main() {
           `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
         );
         const digest = await submit(jobId, ssBlob, htmlBlob);
-        console.log(`  submitted · digest=${digest}`);
+        console.log(`  submitted (pending verification) · digest=${digest}`);
       }
     } catch (err) {
       console.error("tick error:", (err as Error).message);

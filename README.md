@@ -2,22 +2,28 @@
 
 A decentralized URL scan marketplace on Sui. A requester escrows a SUI reward
 against a target URL and a desired vantage (geo / device / browser) and asks for
-N independent scans. **Terminal scanner nodes** listen for open jobs, render the
-page in a headless browser, upload the screenshot + HTML to **Walrus**, and
-submit the resulting blob ids on-chain. Each submission is paid an equal portion
-of the reward; when all slots fill, the job completes. The requester sees every
-incoming screenshot rendered from Walrus on their page.
+N independent, **verified** scans. **Terminal scanner nodes** listen for open
+jobs, render the page in a headless browser, upload the screenshot + HTML to
+**Walrus**, and submit the resulting blob ids on-chain. Each submission lands as
+**PENDING and is paid nothing** until an independent verifier approves it — so
+fake evidence never earns from the escrow. The requester sees every incoming
+screenshot rendered from Walrus on their page.
 
 Flows, end to end:
 
-1. **Post a job** — requester escrows SUI for `scans` slots (web or CLI).
+1. **Post a job** — requester escrows SUI for `scans` verified slots (web or CLI).
 2. **Scan** — each scanner node captures the page (device profile → varied
    screenshots), uploads to Walrus, and calls `submit_scan` with the blob ids.
-3. **Get paid + render** — the node receives its portion of the bounty; the
-   requester's page renders the Walrus screenshots as they arrive.
-4. **CRE verify (Terminal C)** — an independent verifier re-fetches Walrus evidence,
-   enforces a privacy policy, checks URL/HTML integrity, and writes verdicts the
-   UI displays as **CRE verified** badges.
+   The scan is recorded **PENDING**; no payout yet.
+3. **Verify (per scan) → pay** — the verifier re-fetches each submission from
+   Walrus, enforces policy + URL/HTML integrity, and calls `resolve_scan`:
+   approved scans release their portion to the worker, rejected scans keep their
+   funds in escrow (reclaimable / re-scannable). Payout is gated on verification.
+4. **Render + reclaim** — the requester's page renders the Walrus screenshots and
+   per-scan verdicts; once the job settles they can reclaim leftover escrow.
+
+Verification is **per scan, not per job**: a single fake submission is rejected
+and unpaid without blocking the legitimate scans in the same job.
 
 ## Stack
 
@@ -34,9 +40,11 @@ Flows, end to end:
 
 ## Deployed (Sui testnet)
 
-- Package: `0x3bf1b39719b8c0b263d65d21196b04b2ff6567f9b0b3279dffed05c9bbc6b792`
+- Package: `0x47448cd79e2037a04b9cc5b80bf31f6e65840431db707a57be0d9bf506accf81`
 - Market (shared object):
-  `0x18ab02a8ff7f2290080452d3b5a5c1d338ea995f54b58f767e44048a831c9cd7`
+  `0x0b180cf8e40938a10ab20008731a083231f5309a7760636536bfaded08a21c04`
+- Verifier (oracle) address = the publisher of the package; only this address can
+  call `resolve_scan`. In production this stands in for the CRE DON report.
 
 ## Prerequisites
 
@@ -89,18 +97,23 @@ submits — filling one slot per job. Env knobs: `SCANNER_PROFILE`
 
 Policy-denied URLs (Instagram, Facebook, etc.) are skipped by scanner nodes.
 
-## 3) Terminal C — CRE verifier (badges in UI)
+## 3) Terminal C — verifier (gates payout + badges in UI)
 
 Run this in a **separate terminal** while the dev server is up. It polls Sui,
-re-fetches each submission from Walrus, and writes `public/cre-verdicts.json`
-for the UI (badges flip to **CRE verified** / **rejected**):
+re-fetches each submission from Walrus, checks policy + integrity, writes
+`public/cre-verdicts.json` for the UI, and — when given the verifier key —
+**resolves each pending scan on-chain** (approve → pay worker, reject → hold):
 
 ```bash
-pnpm verify          # poll every 8s
+# verifier key = the package publisher's key (the only address allowed to resolve)
+export VERIFIER_SECRET_KEY="$(sui keytool export --key-identity $(sui client active-address) --json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).exportedPrivateKey))')"
+
+pnpm verify          # poll every 8s, resolve pending scans
 pnpm verify:once     # single pass (good for testing)
 ```
 
-No wallet key needed — Terminal C only reads chain + Walrus.
+Without `VERIFIER_SECRET_KEY` it runs read-only (writes verdicts, no on-chain
+payout).
 
 ### Full demo (4 terminals)
 
@@ -109,21 +122,24 @@ No wallet key needed — Terminal C only reads chain + Walrus.
 | Web | `pnpm dev` |
 | Scanner desktop | `SUI_SECRET_KEY=… SCANNER_PROFILE=desktop pnpm scan` |
 | Scanner iphone | `SUI_SECRET_KEY=… SCANNER_PROFILE=iphone pnpm scan` |
-| **CRE verify** | `pnpm verify` |
+| **Verifier** | `VERIFIER_SECRET_KEY=… pnpm verify` |
 
 Optional: Chainlink CRE CLI simulate — see `../cre-vetting/README.md`.
 
-CLI fallback (manual submission with placeholder blobs):
+CLI fallbacks:
 
 ```bash
+# manual submission with placeholder blobs (records PENDING, no payout)
 ./scripts/submit-scan.sh <job_id> [screenshot_blob_id] [html_blob_id]
+# verifier-only: approve/reject a pending scan
+./scripts/resolve-scan.sh <job_id> <index> <approve|reject>
 ```
 
 ## Other CLI
 
 ```bash
-./scripts/list-jobs.sh            # every job, slots filled, and each submission
-./scripts/cancel-job.sh <job_id>  # requester refund of remaining escrow
+./scripts/list-jobs.sh            # every job: verified/pending/attempts + per-scan status
+./scripts/cancel-job.sh <job_id>  # requester refund of remaining escrow (open job)
 ```
 
 ## Redeploy the contract
@@ -141,9 +157,21 @@ node_modules/.bin/sui-ts-codegen generate
 `move/scan_market/sources/scan_market.move`
 
 - `post_job(market, reward: Coin<SUI>, url, params, max_submissions)` — escrows
-  the reward, shares a `ScanJob`, registers it in the `Market`.
-- `submit_scan(job, screenshot_blob_id, html_blob_id)` — pays an equal portion
-  of the reward, records the submission; completes the job on the final slot.
-- `cancel_job(job)` — requester-only refund of the remaining escrow.
+  the reward, copies the market `verifier`, shares a `ScanJob`, registers it.
+- `submit_scan(job, screenshot_blob_id, html_blob_id)` — records a **PENDING**
+  submission; pays nothing. Accepts scans while `approved + pending < max`.
+- `resolve_scan(job, index, approve, verdict_reason, content_hash)` —
+  **verifier-only**. Approve releases that scan's `per_scan` portion to the
+  worker; reject holds the funds. The CRE verdict (`verdict_reason` + HTML
+  `content_hash`) is stored on the submission. Completes the job once
+  `max_submissions` scans are approved.
+- `set_cloaking(job, clusters, detail)` — verifier-only. Records the cloaking
+  summary (distinct content clusters across the job's scans) on-chain.
+- `cancel_job(job)` — requester-only refund of remaining escrow (open job).
+- `reclaim_remainder(job)` — requester-only sweep of leftover escrow once the
+  job is completed or cancelled.
 
-Emits `JobPosted` / `ScanSubmitted` / `JobCompleted` events.
+The verifier's output is persisted **on-chain** (per-scan `verdict_reason` +
+`content_hash`, job-level `cloaking_clusters` + `cloaking_detail`) and rendered
+in the UI from chain. Emits `JobPosted` / `ScanSubmitted` / `ScanResolved` /
+`CloakingRecorded` / `JobCompleted` events.

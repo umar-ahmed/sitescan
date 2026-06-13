@@ -24,9 +24,14 @@ export function JobBoard() {
         url: j.json.url,
         params: j.json.params,
         reward_total: j.json.reward_total,
+        per_scan: j.json.per_scan,
         max_submissions: j.json.max_submissions,
+        approved_count: j.json.approved_count,
+        pending_count: j.json.pending_count,
         submissions: j.json.submissions,
         status: j.json.status,
+        cloaking_clusters: j.json.cloaking_clusters,
+        cloaking_detail: j.json.cloaking_detail,
       }));
     },
   });
