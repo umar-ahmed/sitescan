@@ -1,29 +1,36 @@
 @import "tailwindcss";
 
 @theme {
-  --color-background: oklch(0.145 0 0);
-  --color-foreground: oklch(0.985 0 0);
-  --color-card: oklch(0.145 0 0);
-  --color-card-foreground: oklch(0.985 0 0);
-  --color-primary: oklch(0.985 0 0);
-  --color-primary-foreground: oklch(0.205 0 0);
-  --color-secondary: oklch(0.269 0 0);
-  --color-secondary-foreground: oklch(0.985 0 0);
-  --color-muted: oklch(0.269 0 0);
-  --color-muted-foreground: oklch(0.708 0 0);
-  --color-accent: oklch(0.269 0 0);
-  --color-accent-foreground: oklch(0.985 0 0);
-  --color-destructive: oklch(0.396 0.141 25.723);
-  --color-destructive-foreground: oklch(0.637 0.237 25.331);
-  --color-border: oklch(0.269 0 0);
-  --color-input: oklch(0.269 0 0);
-  --color-ring: oklch(0.556 0 0);
+  /* Light, utilitarian theme with ChainPatrol purple as the accent.
+     Page sits on a cool gray so white panels read as distinct surfaces. */
+  --color-background: #e8eaf0;
+  --color-foreground: #17181c;
+  --color-card: #ffffff;
+  --color-nav: #241753;
+  --color-card-foreground: #17181c;
+  --color-primary: #5b3fa3;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #eef0f3;
+  --color-secondary-foreground: #2a2150;
+  --color-muted: #f0f1f4;
+  --color-muted-foreground: #5f6471;
+  --color-accent: #ece7f9;
+  --color-accent-foreground: #391881;
+  --color-destructive: #dc2626;
+  --color-destructive-foreground: #ffffff;
+  --color-border: #e4e6ec;
+  --color-input: #d6d9e1;
+  --color-ring: #7059a6;
   --color-sui: oklch(0.7 0.2 220);
 
-  --radius-sm: 0.25rem;
-  --radius-md: 0.375rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
+  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+
+  /* Near-square corners — sharper than a typical template. */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.1875rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.375rem;
 }
 
 * {
@@ -33,7 +40,7 @@
 body {
   background-color: var(--color-background);
   color: var(--color-foreground);
-  font-family:
-    ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
-    "Segoe UI Symbol", "Noto Color Emoji";
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-family: var(--font-sans);
 }
