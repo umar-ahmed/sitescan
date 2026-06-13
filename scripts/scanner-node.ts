@@ -1,4 +1,11 @@
-import { chromium, type Browser } from "playwright";
+import {
+  chromium,
+  firefox,
+  webkit,
+  devices,
+  type Browser,
+  type BrowserType,
+} from "playwright";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
@@ -19,39 +26,75 @@ const MARKET =
 const RPC = process.env.SUI_RPC ?? "https://fullnode.testnet.sui.io:443";
 const WALRUS_PUBLISHER = process.env.WALRUS_PUBLISHER;
 const POLL_MS = Number(process.env.POLL_MS ?? 4000);
-const PROFILE = process.env.SCANNER_PROFILE ?? "desktop";
 
-const PROFILES: Record<
-  string,
-  {
-    viewport: { width: number; height: number };
-    userAgent: string;
-    isMobile: boolean;
-    deviceScaleFactor: number;
-  }
-> = {
-  desktop: {
-    viewport: { width: 1280, height: 800 },
-    userAgent:
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
-    isMobile: false,
-    deviceScaleFactor: 1,
-  },
-  iphone: {
-    viewport: { width: 390, height: 844 },
-    userAgent:
-      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-    isMobile: true,
-    deviceScaleFactor: 3,
-  },
-  android: {
-    viewport: { width: 360, height: 800 },
-    userAgent:
-      "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Mobile Safari/537.36",
-    isMobile: true,
-    deviceScaleFactor: 2.6,
-  },
+// A node serves exactly one vantage (geo / device / browser) and only claims
+// jobs whose params match it. SCANNER_PROFILE selects the device; SCANNER_BROWSER
+// and SCANNER_GEO override the browser engine and declared region.
+const PROFILE = (process.env.SCANNER_PROFILE ?? "desktop").toLowerCase();
+
+type Engine = "chromium" | "firefox" | "webkit";
+
+// Requested/declared browser names → the real Playwright engine that renders it.
+const ENGINE_OF: Record<string, Engine> = {
+  chrome: "chromium",
+  chromium: "chromium",
+  edge: "chromium",
+  safari: "webkit",
+  webkit: "webkit",
+  firefox: "firefox",
+  ff: "firefox",
 };
+
+const ENGINES: Record<Engine, BrowserType> = { chromium, firefox, webkit };
+
+// The browser a device profile defaults to when SCANNER_BROWSER is unset.
+const DEFAULT_BROWSER: Record<string, string> = {
+  desktop: "chrome",
+  iphone: "safari",
+  android: "chrome",
+};
+
+// Each device profile maps to a real Playwright device descriptor, which carries
+// the accurate user-agent + viewport + touch settings for that phone. `null`
+// means a plain desktop context that keeps the engine's own real UA.
+const DEVICE_DESCRIPTOR: Record<string, string | null> = {
+  desktop: null,
+  iphone: "iPhone 15",
+  android: "Pixel 7",
+};
+
+// This node's declared capability. Jobs are matched against it.
+const CAP = {
+  geo: (process.env.SCANNER_GEO ?? "US").toLowerCase(),
+  device: DEVICE_DESCRIPTOR[PROFILE] !== undefined ? PROFILE : "desktop",
+  browser: (process.env.SCANNER_BROWSER ?? DEFAULT_BROWSER[PROFILE] ?? "chrome").toLowerCase(),
+};
+const CAP_ENGINE: Engine = ENGINE_OF[CAP.browser] ?? "chromium";
+
+// Build the browser-context options once: emulate the chosen device accurately,
+// dropping the mobile-only fields that Firefox's engine doesn't support.
+type ContextOptions = NonNullable<Parameters<Browser["newContext"]>[0]>;
+const contextOptions: ContextOptions = (() => {
+  const name = DEVICE_DESCRIPTOR[CAP.device];
+  if (name && devices[name]) {
+    const d = devices[name];
+    const opts: ContextOptions = {
+      userAgent: d.userAgent,
+      viewport: d.viewport,
+      deviceScaleFactor: d.deviceScaleFactor,
+      isMobile: d.isMobile,
+      hasTouch: d.hasTouch,
+    };
+    if (CAP_ENGINE === "firefox") {
+      opts.isMobile = undefined;
+      opts.deviceScaleFactor = undefined;
+      opts.hasTouch = undefined;
+    }
+    return opts;
+  }
+  return { viewport: { width: 1280, height: 800 } };
+})();
+const DEVICE_LABEL = DEVICE_DESCRIPTOR[CAP.device] ?? "desktop";
 
 const secret = process.env.SUI_SECRET_KEY;
 if (!secret) {
@@ -67,9 +110,36 @@ const { secretKey } = decodeSuiPrivateKey(secret);
 const keypair = Ed25519Keypair.fromSecretKey(secretKey);
 const address = keypair.getPublicKey().toSuiAddress();
 const client = new SuiGrpcClient({ network: "testnet", baseUrl: RPC });
-const profile = PROFILES[PROFILE] ?? PROFILES.desktop;
 
 const handled = new Set<string>();
+
+// Parse a "geo=US;device=iphone;browser=safari" params string into a map.
+function parseParams(params: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of params.split(";")) {
+    const [k, ...rest] = part.split("=");
+    const key = k?.trim().toLowerCase();
+    const val = rest.join("=").trim().toLowerCase();
+    if (key && val) out[key] = val;
+  }
+  return out;
+}
+
+// Returns a human-readable reason if this node may NOT serve the job, else null.
+// Every vantage field the job specifies must match the node; unspecified fields
+// are treated as wildcards so legacy params-less jobs still get served.
+function vantageMismatch(params: string): string | null {
+  const want = parseParams(params);
+  if (want.geo && want.geo !== CAP.geo) return `geo ${want.geo}≠${CAP.geo}`;
+  if (want.device && want.device !== CAP.device)
+    return `device ${want.device}≠${CAP.device}`;
+  if (want.browser) {
+    const wantEngine = ENGINE_OF[want.browser] ?? want.browser;
+    if (wantEngine !== CAP_ENGINE)
+      return `browser ${want.browser}(${wantEngine})≠${CAP.browser}(${CAP_ENGINE})`;
+  }
+  return null;
+}
 
 async function getJobIds(): Promise<string[]> {
   const market = await Market.get({ client, objectId: MARKET });
@@ -90,12 +160,7 @@ async function capture(
   browser: Browser,
   url: string,
 ): Promise<{ screenshot: Buffer; html: string }> {
-  const context = await browser.newContext({
-    viewport: profile.viewport,
-    userAgent: profile.userAgent,
-    isMobile: profile.isMobile,
-    deviceScaleFactor: profile.deviceScaleFactor,
-  });
+  const context = await browser.newContext(contextOptions);
   const page = await context.newPage();
   let html: string;
   try {
@@ -106,7 +171,7 @@ async function capture(
       `<html><body style="font-family:sans-serif;padding:40px">
        <h2>Scan of ${url}</h2>
        <p>Navigation failed: ${(err as Error).message}</p>
-       <p>profile: ${PROFILE}</p></body></html>`,
+       <p>profile: ${CAP.device} / ${CAP.browser} (${CAP_ENGINE})</p></body></html>`,
     );
     html = await page.content();
   }
@@ -135,9 +200,12 @@ async function submit(jobId: string, ssBlob: string, htmlBlob: string) {
 }
 
 async function main() {
-  console.log(`Scanner node up · profile=${PROFILE} · address=${address}`);
+  console.log(
+    `Scanner node up · device=${CAP.device} (${DEVICE_LABEL}) · browser=${CAP.browser} (${CAP_ENGINE}) · geo=${CAP.geo}`,
+  );
+  console.log(`address=${address}`);
   console.log(`Package=${PKG}\nMarket=${MARKET}\nPolling every ${POLL_MS}ms…`);
-  const browser = await chromium.launch({ headless: true });
+  const browser = await ENGINES[CAP_ENGINE].launch({ headless: true });
 
   const tick = async () => {
     try {
@@ -149,8 +217,14 @@ async function main() {
           handled.add(jobId);
           continue;
         }
+        const skip = vantageMismatch(claim.params);
+        if (skip) {
+          console.log(`· skip ${jobId} — wants ${skip}`);
+          handled.add(jobId);
+          continue;
+        }
         handled.add(jobId);
-        console.log(`\n→ scanning ${claim.url} for job ${jobId}`);
+        console.log(`\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`);
         const { screenshot, html } = await capture(browser, claim.url);
         const ssBlob = await uploadToWalrus(screenshot, {
           publisher: WALRUS_PUBLISHER,
