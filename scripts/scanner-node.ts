@@ -128,14 +128,36 @@ const client = new SuiGrpcClient({ network: "testnet", baseUrl: RPC });
 
 const handled = new Set<string>();
 
-// Parse a "geo=US;device=iphone;browser=safari" params string into a map.
+// Parse a job's vantage params into a lowercased map. Accepts both the CLI
+// format ("geo=US;device=iphone;browser=safari") and the web UI's JSON format
+// ('{"geo":"BR","device":"iphone","browser":"safari"}'). Values are lowercased
+// so they compare cleanly against this node's capability.
 function parseParams(params: string): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const part of params.split(";")) {
+  const add = (key: unknown, val: unknown) => {
+    const k = String(key ?? "")
+      .trim()
+      .toLowerCase();
+    const v = String(val ?? "")
+      .trim()
+      .toLowerCase();
+    if (k && v) out[k] = v;
+  };
+  const trimmed = params.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object") {
+        for (const [k, v] of Object.entries(parsed)) add(k, v);
+        return out;
+      }
+    } catch {
+      // fall through to key=value parsing
+    }
+  }
+  for (const part of trimmed.split(/[;,]/)) {
     const [k, ...rest] = part.split("=");
-    const key = k?.trim().toLowerCase();
-    const val = rest.join("=").trim().toLowerCase();
-    if (key && val) out[key] = val;
+    add(k, rest.join("="));
   }
   return out;
 }
