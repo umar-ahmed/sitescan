@@ -12,7 +12,6 @@ import {
 } from "./contracts/scan_market/scan_market";
 import { mistToSui, useScanConfig } from "./lib/config";
 import { walrusAggregatorUrl } from "./lib/walrus";
-import { useCreVerdicts, verdictForJob } from "./lib/useCreVerdicts";
 import { Card } from "./components/ui/card";
 import {
   Globe,
@@ -272,8 +271,6 @@ function VantageBlock({
   const dAppKit = useDAppKit();
   const queryClient = useQueryClient();
   const { packageId } = useScanConfig();
-  const creVerdicts = useCreVerdicts();
-  const creVerdict = verdictForJob(creVerdicts, job.id);
 
   const [imgFailed, setImgFailed] = useState(false);
   const sub = job.submissions[0];
@@ -355,7 +352,6 @@ function VantageBlock({
           <div className="text-amber-700">awaiting scan</div>
         )}
         {sub && <NotaryBadge submission={sub} />}
-        {creVerdict && <CreBadge status={creVerdict.status} />}
         {sub?.content_hash && (
           <div className="break-all font-mono text-[10px] text-muted-foreground">
             {sub.content_hash.slice(0, 16)}…
@@ -432,20 +428,6 @@ function SubStatus({
   if (status === SUB_REJECTED)
     return <div className="text-red-600">rejected · not paid</div>;
   return <div className="text-amber-700">awaiting verification</div>;
-}
-
-function CreBadge({ status }: { status: string }) {
-  if (status === "VERIFIED")
-    return (
-      <span className="inline-flex items-center gap-1 text-emerald-700">
-        <ShieldCheck className="h-3 w-3" /> verified
-      </span>
-    );
-  return (
-    <span className="inline-flex items-center gap-1 text-red-600">
-      <ShieldX className="h-3 w-3" /> rejected
-    </span>
-  );
 }
 
 // Surfaces the TLSNotary provenance layer: whether the scanner attached a proof

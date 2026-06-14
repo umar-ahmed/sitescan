@@ -42,10 +42,8 @@ function App() {
               evidence. The verifier independently re-checks each proof (notary
               signature → proven host → HTTP status → HTML hash) and{" "}
               <span className="font-medium">payout is gated on it</span>. Run{" "}
-              <code className="text-violet-950">
-                TLSN_ENABLED=1 pnpm verify
-              </code>{" "}
-              in another window to release payouts.
+              <code className="text-violet-950">pnpm verify</code> in another
+              window to release payouts.
             </p>
           </div>
           <JobBoard />

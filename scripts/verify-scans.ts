@@ -1,6 +1,3 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
 import { Ed25519Keypair } from "@mysten/sui/keypairs/ed25519";
 import { decodeSuiPrivateKey } from "@mysten/sui/cryptography";
@@ -15,7 +12,7 @@ import {
   DEFAULT_WALRUS_AGGREGATOR,
   walrusAggregatorUrl,
 } from "../src/lib/walrus";
-import { type JobVerdict, type VerdictStore, vetJob } from "../src/lib/vetting";
+import { computeCloakingDelta } from "../src/lib/vetting";
 import {
   TlsnHarness,
   DEFAULT_NOTARY_URL,
@@ -27,10 +24,6 @@ import {
   TESTNET_MARKET_ID,
 } from "../src/constants";
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
-const VERDICTS_PATH =
-  process.env.VERDICTS_PATH ?? join(ROOT, "public/cre-verdicts.json");
-
 const PKG = process.env.SCAN_PKG ?? TESTNET_SCAN_MARKET_PACKAGE_ID!;
 const MARKET = process.env.SCAN_MARKET ?? TESTNET_MARKET_ID!;
 const RPC = process.env.SUI_RPC ?? "https://fullnode.testnet.sui.io:443";
@@ -39,11 +32,10 @@ const WALRUS_AGGREGATOR =
 const POLL_MS = Number(process.env.POLL_MS ?? 8000);
 const RUN_ONCE = process.argv.includes("--once");
 
-// TLSNotary: when enabled, a submission's payout is gated on a verifiable proof
-// that the target host served the HTML over TLS, signed by the trusted notary.
-const TLSN_ENABLED = !/^(0|false|no|off)$/i.test(
-  process.env.TLSN_ENABLED ?? "1",
-);
+// TLSNotary is the sole payout gate: a submission is paid only if it carries a
+// proof that cryptographically verifies the target host served the HTML over
+// TLS, signed by the trusted notary. There is no heuristic / Walrus-re-fetch
+// fallback.
 const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? DEFAULT_NOTARY_URL;
 
 const SUB_PENDING = 0;
@@ -136,6 +128,7 @@ interface ChainSubmission {
   screenshot_blob_id: string;
   html_blob_id: string;
   notary_proof_blob_id: string;
+  content_hash: string;
   status: number;
 }
 
@@ -160,100 +153,72 @@ async function loadJobs(): Promise<ChainJob[]> {
       screenshot_blob_id: s.screenshot_blob_id,
       html_blob_id: s.html_blob_id,
       notary_proof_blob_id: s.notary_proof_blob_id,
+      content_hash: s.content_hash,
       status: Number(s.status),
     })),
   }));
 }
 
-async function writeVerdicts(jobs: Record<string, JobVerdict>) {
-  const store: VerdictStore = {
-    updatedAt: Date.now(),
-    verifier: verifierAddress ? `oracle:${verifierAddress}` : "terminal-c",
-    jobs,
-  };
-  await mkdir(dirname(VERDICTS_PATH), { recursive: true });
-  await writeFile(VERDICTS_PATH, JSON.stringify(store, null, 2));
-}
-
-function logVerdict(v: JobVerdict) {
-  const delta = v.cloakingDelta
-    ? ` · cloaking=${v.cloakingDelta.clusters} cluster(s)`
-    : "";
-  console.log(
-    `[verify] ${v.status} job=${v.jobId.slice(0, 10)}… url=${v.url}${delta}`,
-  );
-  if (v.reason) console.log(`         ${v.reason}`);
-}
-
-async function resolveOnChain(
-  job: ChainJob,
-  verdict: JobVerdict,
-): Promise<void> {
+async function resolveOnChain(job: ChainJob): Promise<void> {
   if (!verifierKeypair) return;
   if (job.status !== STATUS_OPEN) return;
 
   const pending = job.submissions.filter((s) => s.status === SUB_PENDING);
+  if (pending.length === 0) return;
+
+  // TLSNotary is the only acceptance path: a submission must carry a proof that
+  // cryptographically verifies, or it is rejected.
   const decisions = await Promise.all(
     pending.map(async (s) => {
-      // When TLSNotary is enabled it is the only acceptance path: a submission
-      // must carry a proof that cryptographically verifies, or it is rejected.
-      // No heuristic / Walrus re-fetch fallback.
-      if (TLSN_ENABLED) {
-        if (!s.notary_proof_blob_id) {
-          return {
-            index: s.index,
-            approve: false,
-            reason: "No TLSNotary proof attached (proof required, no fallback)",
-            contentHash: "",
-            transient: false,
-          };
-        }
-        const proof = await verifyProof(job.url, s.notary_proof_blob_id);
+      if (!s.notary_proof_blob_id) {
         return {
           index: s.index,
-          approve: proof.approve,
-          reason: proof.reason,
-          contentHash: proof.contentHash,
-          transient: proof.transient,
+          approve: false,
+          reason: "No TLSNotary proof attached (proof required, no fallback)",
+          contentHash: "",
+          transient: false,
         };
       }
-      const sv = verdict.submissions[s.index];
-      const approve = sv?.status === "VERIFIED";
+      const proof = await verifyProof(job.url, s.notary_proof_blob_id);
       return {
         index: s.index,
-        approve,
-        reason:
-          sv?.reason ??
-          (approve ? "Evidence verified via Walrus re-fetch" : "Rejected"),
-        contentHash: sv?.htmlContentHash ?? "",
-        transient: false,
+        approve: proof.approve,
+        reason: proof.reason,
+        contentHash: proof.contentHash,
+        transient: proof.transient,
       };
     }),
   );
-  if (decisions.length === 0) return;
 
   // Transient verdicts (Walrus/harness failures) are left pending and retried
   // next poll, so a verifier-side hiccup never wrongly rejects a valid proof.
   const transient = decisions.filter((d) => d.transient);
-  const actionable = decisions.filter((d) => !d.transient);
   for (const d of transient) {
     console.log(
       `[verify] job=${job.id.slice(0, 10)}… url=${job.url}\n         RETRY scan #${d.index} — ${d.reason}`,
     );
   }
+  const actionable = decisions.filter((d) => !d.transient);
   if (actionable.length === 0) return;
 
-  if (TLSN_ENABLED) {
-    const cloak = verdict.cloakingDelta
-      ? ` · cloaking=${verdict.cloakingDelta.clusters} cluster(s)`
-      : "";
-    console.log(`[verify] job=${job.id.slice(0, 10)}… url=${job.url}${cloak}`);
-    for (const d of actionable) {
-      console.log(
-        `         ${d.approve ? "PROVEN" : "REJECTED"} scan #${d.index} — ${d.reason}`,
-      );
-    }
+  console.log(`[verify] job=${job.id.slice(0, 10)}… url=${job.url}`);
+  for (const d of actionable) {
+    console.log(
+      `         ${d.approve ? "PROVEN" : "REJECTED"} scan #${d.index} — ${d.reason}`,
+    );
   }
+
+  // Cloaking is pure content-hash clustering across the job's submissions: the
+  // hashes already recorded on-chain plus the hashes from this round's proven
+  // scans. It is not an accept/reject heuristic — every paid scan is already
+  // TLS-proven; this only flags that vantages saw different pages.
+  const contentHashes = [
+    ...job.submissions.map((s) => s.content_hash),
+    ...actionable.filter((d) => d.approve).map((d) => d.contentHash),
+  ].filter(Boolean);
+  const uniqueHashes = [...new Set(contentHashes)];
+  const cloakingDelta =
+    uniqueHashes.length > 1 ? computeCloakingDelta(uniqueHashes) : undefined;
 
   const tx = new Transaction();
   for (const d of actionable) {
@@ -270,14 +235,14 @@ async function resolveOnChain(
       }),
     );
   }
-  if (verdict.cloakingDelta) {
+  if (cloakingDelta) {
     tx.add(
       setCloaking({
         package: PKG,
         arguments: {
           job: job.id,
-          clusters: BigInt(verdict.cloakingDelta.clusters),
-          detail: verdict.cloakingDelta.detail,
+          clusters: BigInt(cloakingDelta.clusters),
+          detail: cloakingDelta.detail,
         },
       }),
     );
@@ -298,33 +263,16 @@ async function resolveOnChain(
   }
 }
 
-async function tick(existing: Record<string, JobVerdict>) {
+async function tick() {
   const jobs = await loadJobs();
-  const next = { ...existing };
-
   for (const job of jobs) {
     if (job.submissions.length === 0) continue;
-    const verdict = await vetJob({
-      jobId: job.id,
-      url: job.url,
-      submissions: job.submissions,
-      walrusAggregator: WALRUS_AGGREGATOR,
-      verifier: verifierAddress ? `oracle:${verifierAddress}` : "terminal-c",
-    });
-    next[job.id] = verdict;
-    // When TLSNotary is the gate, resolveOnChain logs the proof-based verdict
-    // per submission; the heuristic vetJob output is only used for the cloaking
-    // delta + the UI verdict store, so don't print it as if it were the decision.
-    if (!TLSN_ENABLED) logVerdict(verdict);
     try {
-      await resolveOnChain(job, verdict);
+      await resolveOnChain(job);
     } catch (err) {
       console.error("  resolve error:", (err as Error).message);
     }
   }
-
-  await writeVerdicts(next);
-  return next;
 }
 
 async function main() {
@@ -333,34 +281,26 @@ async function main() {
   );
   console.log(`Market=${MARKET}`);
   console.log(`Walrus=${WALRUS_AGGREGATOR}`);
-  console.log(`Verdicts → ${VERDICTS_PATH}`);
   if (verifierAddress) {
     console.log(`Verifier key=${verifierAddress} (resolves payouts on-chain)`);
   } else {
     console.log(
-      "No VERIFIER_SECRET_KEY set — read-only mode (writes verdicts, no on-chain payout).",
+      "No VERIFIER_SECRET_KEY set — read-only mode (no on-chain payout).",
     );
   }
-  if (TLSN_ENABLED) {
-    trustedNotaryKeyHex = await fetchTrustedNotaryKey();
-    tlsnHarness = new TlsnHarness({ notaryUrl: TLSN_NOTARY_URL });
-    await tlsnHarness.start();
-    console.log(
-      `TLSNotary gating ON · notary=${TLSN_NOTARY_URL} · key=${trustedNotaryKeyHex.slice(0, 14)}…`,
-    );
-  } else {
-    console.log(
-      "TLSNotary gating OFF (TLSN_ENABLED=0) — falling back to Walrus re-fetch heuristic.",
-    );
-  }
+  trustedNotaryKeyHex = await fetchTrustedNotaryKey();
+  tlsnHarness = new TlsnHarness({ notaryUrl: TLSN_NOTARY_URL });
+  await tlsnHarness.start();
+  console.log(
+    `TLSNotary gating ON · notary=${TLSN_NOTARY_URL} · key=${trustedNotaryKeyHex.slice(0, 14)}…`,
+  );
   if (RUN_ONCE) {
     console.log("Mode: single pass (--once)\n");
   } else {
     console.log(`Polling every ${POLL_MS}ms…\n`);
   }
 
-  let cache: Record<string, JobVerdict> = {};
-  cache = await tick(cache);
+  await tick();
 
   if (RUN_ONCE) {
     await tlsnHarness?.stop();
@@ -368,13 +308,9 @@ async function main() {
   }
 
   setInterval(() => {
-    tick(cache)
-      .then((updated) => {
-        cache = updated;
-      })
-      .catch((err) => {
-        console.error("verify tick error:", (err as Error).message);
-      });
+    tick().catch((err) => {
+      console.error("verify tick error:", (err as Error).message);
+    });
   }, POLL_MS);
 }
 

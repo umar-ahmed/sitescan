@@ -88,6 +88,12 @@ const CAP = {
 };
 const CAP_ENGINE: Engine = ENGINE_OF[CAP.browser] ?? "chromium";
 
+// When set, the node ignores a job's requested geo and will claim jobs for any
+// region. Geo is vantage metadata only (the node doesn't truly geolocate), so a
+// single node can sequentially serve every geo's jobs. Device/browser still
+// matter because they change how the page is actually rendered.
+const IGNORE_GEO = /^(1|true|yes|on)$/i.test(process.env.SCANNER_IGNORE_GEO ?? "");
+
 // Build the browser-context options once: emulate the chosen device accurately,
 // dropping the mobile-only fields that Firefox's engine doesn't support.
 type ContextOptions = NonNullable<Parameters<Browser["newContext"]>[0]>;
@@ -169,7 +175,8 @@ function parseParams(params: string): Record<string, string> {
 // are treated as wildcards so legacy params-less jobs still get served.
 function vantageMismatch(params: string): string | null {
   const want = parseParams(params);
-  if (want.geo && want.geo !== CAP.geo) return `geo ${want.geo}≠${CAP.geo}`;
+  if (!IGNORE_GEO && want.geo && want.geo !== CAP.geo)
+    return `geo ${want.geo}≠${CAP.geo}`;
   if (want.device && want.device !== CAP.device)
     return `device ${want.device}≠${CAP.device}`;
   if (want.browser) {
@@ -285,7 +292,7 @@ async function submit(
 
 async function main() {
   console.log(
-    `Scanner node up · device=${CAP.device} (${DEVICE_LABEL}) · browser=${CAP.browser} (${CAP_ENGINE}) · geo=${CAP.geo}`,
+    `Scanner node up · device=${CAP.device} (${DEVICE_LABEL}) · browser=${CAP.browser} (${CAP_ENGINE}) · geo=${IGNORE_GEO ? "any" : CAP.geo}`,
   );
   console.log(`address=${address}`);
   console.log(`Package=${PKG}\nMarket=${MARKET}\nPolling every ${POLL_MS}ms…`);
