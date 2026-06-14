@@ -195,8 +195,10 @@ async function capture(
 
 let tlsnHarness: TlsnHarness | null = null;
 
-// Best-effort TLSNotary proof of the target URL. Returns the Walrus blob id of
-// the presentation, or "" if proving is disabled/unavailable (e.g. TLS 1.3).
+// TLSNotary proof of the target URL. Returns the Walrus blob id of the
+// presentation, or "" if proving failed/unavailable (e.g. TLS 1.3, unsupported
+// cipher). When TLSN is enabled the caller treats "" as a hard skip — there is
+// no non-proof submission path.
 const PROOF_TIMEOUT_MS = Number(process.env.TLSN_PROOF_TIMEOUT_MS ?? 90000);
 
 async function proveAndUpload(url: string): Promise<string> {
@@ -290,6 +292,18 @@ async function main() {
           `\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`,
         );
         const { screenshot, html } = await capture(browser, claim.url);
+
+        let proofBlob = "";
+        if (TLSN_ENABLED) {
+          proofBlob = await proveAndUpload(claim.url);
+          if (!proofBlob) {
+            console.warn(
+              `  ✗ no TLSNotary proof for ${claim.url} — not submitting (TLSNotary required, no fallback)`,
+            );
+            continue;
+          }
+        }
+
         const ssBlob = await uploadToWalrus(screenshot, {
           publisher: WALRUS_PUBLISHER,
           contentType: "image/png",
@@ -301,7 +315,6 @@ async function main() {
         console.log(
           `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
         );
-        const proofBlob = await proveAndUpload(claim.url);
         const digest = await submit(jobId, ssBlob, htmlBlob, proofBlob);
         console.log(`  submitted (pending verification) · digest=${digest}`);
       }

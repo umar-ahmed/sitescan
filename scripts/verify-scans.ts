@@ -175,9 +175,18 @@ async function resolveOnChain(
   const pending = job.submissions.filter((s) => s.status === SUB_PENDING);
   const decisions = await Promise.all(
     pending.map(async (s) => {
-      // A submission carrying a TLSNotary proof is gated on cryptographic
-      // provenance; otherwise fall back to the Walrus re-fetch heuristic.
-      if (TLSN_ENABLED && s.notary_proof_blob_id) {
+      // When TLSNotary is enabled it is the only acceptance path: a submission
+      // must carry a proof that cryptographically verifies, or it is rejected.
+      // No heuristic / Walrus re-fetch fallback.
+      if (TLSN_ENABLED) {
+        if (!s.notary_proof_blob_id) {
+          return {
+            index: s.index,
+            approve: false,
+            reason: "No TLSNotary proof attached (proof required, no fallback)",
+            contentHash: "",
+          };
+        }
         const proof = await verifyProof(job.url, s.notary_proof_blob_id);
         return {
           index: s.index,
