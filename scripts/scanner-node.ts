@@ -17,6 +17,8 @@ import {
 } from "../src/contracts/scan_market/scan_market";
 import { uploadToWalrus } from "../src/lib/walrus";
 import { checkPolicy } from "../src/lib/vetting";
+import { fetchEnsMetadata } from "./ens-metadata";
+import { isEnsName, ensToUrl } from "../src/lib/ens";
 import {
   TESTNET_SCAN_MARKET_PACKAGE_ID,
   TESTNET_MARKET_ID,
@@ -225,13 +227,14 @@ async function main() {
           continue;
         }
         handled.add(jobId);
-        const policy = checkPolicy(claim.url);
+        const scanUrl = isEnsName(claim.url) ? ensToUrl(claim.url) : claim.url;
+        const policy = checkPolicy(scanUrl);
         if (!policy.allowed) {
-          console.log(`  skipping policy-denied URL: ${claim.url} (${policy.reason})`);
+          console.log(`  skipping policy-denied URL: ${scanUrl} (${policy.reason})`);
           continue;
         }
-        console.log(`\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`);
-        const { screenshot, html } = await capture(browser, claim.url);
+        console.log(`\n→ scanning ${scanUrl} [${claim.params}] for job ${jobId}`);
+        const { screenshot, html } = await capture(browser, scanUrl);
         const ssBlob = await uploadToWalrus(screenshot, {
           publisher: WALRUS_PUBLISHER,
           contentType: "image/png",
@@ -243,6 +246,16 @@ async function main() {
         console.log(
           `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
         );
+
+        // Optional: upload ENS metadata if the job target is an ENS name
+        const ensMetadata = await fetchEnsMetadata(claim.url).catch(() => null);
+        if (ensMetadata) {
+          const ensMetaBlob = await uploadToWalrus(
+            JSON.stringify(ensMetadata, null, 2),
+            { publisher: WALRUS_PUBLISHER, contentType: "application/json" },
+          );
+          console.log(`  ENS metadata uploaded: ${ensMetaBlob}`);
+        }
         const digest = await submit(jobId, ssBlob, htmlBlob);
         console.log(`  submitted (pending verification) · digest=${digest}`);
       }
