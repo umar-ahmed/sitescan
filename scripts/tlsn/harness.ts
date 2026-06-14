@@ -161,13 +161,13 @@ export class TlsnHarness {
     target: string,
     maxRecv = 16384,
     timeoutMs = 0,
-    creds: { cookies?: string; userAgent?: string } = {},
+    creds: { cookies?: string; userAgent?: string; headBytes?: number } = {},
   ): Promise<ProveResult> {
     const host = new URL(target).hostname;
     const proxyUrl = `ws://127.0.0.1:${this.wsPort}/${host}/443`;
     const { context, page } = await this.newPage();
     const evaluation = page.evaluate(
-      async ([t, n, p, m, cookies, ua]) =>
+      async ([t, n, p, m, cookies, ua, headBytes]) =>
         // @ts-expect-error injected by prover.html
         await window.runProof({
           target: t,
@@ -176,6 +176,7 @@ export class TlsnHarness {
           maxRecv: m,
           cookies,
           userAgent: ua,
+          headBytes,
         }),
       [
         target,
@@ -184,6 +185,7 @@ export class TlsnHarness {
         maxRecv,
         creds.cookies ?? "",
         creds.userAgent ?? "",
+        creds.headBytes ?? 0,
       ] as const,
     ) as Promise<ProveResult>;
     let timer: ReturnType<typeof setTimeout> | undefined;

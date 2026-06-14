@@ -48,6 +48,7 @@ async function prove({
   maxRecv,
   cookies,
   userAgent,
+  headBytes,
 }) {
   await ensureInit();
   const host = new URL(target).hostname;
@@ -64,6 +65,10 @@ async function prove({
     Accept: "*/*",
   };
   if (cookies) headers.Cookie = cookies;
+  // Head-only proving: ask the server for just the first N bytes so the MPC
+  // transcript stays small and heavy pages still prove quickly. Servers that
+  // honor Range reply 206 Partial Content (accepted by the verifier).
+  if (headBytes && headBytes > 0) headers.Range = `bytes=0-${headBytes - 1}`;
 
   const presentationJSON = await Prover.notarize({
     url: target,
