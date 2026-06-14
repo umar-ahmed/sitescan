@@ -12,7 +12,6 @@ import {
 } from "./contracts/scan_market/scan_market";
 import { mistToSui, useScanConfig } from "./lib/config";
 import { walrusAggregatorUrl } from "./lib/walrus";
-import { useCreVerdicts, verdictForJob } from "./lib/useCreVerdicts";
 import { Card } from "./components/ui/card";
 import {
   Globe,
@@ -24,12 +23,15 @@ import {
   Smartphone,
   Monitor,
   ImageOff,
+  Lock,
+  FileCheck2,
 } from "lucide-react";
 
 export interface Submission {
   worker: string;
   screenshot_blob_id: string;
   html_blob_id: string;
+  notary_proof_blob_id: string;
   status: number;
   paid: string | number | bigint;
   verdict_reason: string;
@@ -142,6 +144,13 @@ export function ScanGroup({ group }: { group: ScanGroupData }) {
   const clusterOf = (h: string) =>
     h ? String.fromCharCode(65 + clusterList.indexOf(h)) : null;
 
+  // TLSNotary provenance across the group's submissions.
+  const allSubs = group.jobs.flatMap((j) => j.submissions);
+  const proofCount = allSubs.filter((s) => s.notary_proof_blob_id).length;
+  const provenCount = allSubs.filter(
+    (s) => s.notary_proof_blob_id && s.status === SUB_APPROVED,
+  ).length;
+
   return (
     <Card className="overflow-hidden">
       <button
@@ -177,6 +186,21 @@ export function ScanGroup({ group }: { group: ScanGroupData }) {
           <div className="truncate font-mono text-xs text-muted-foreground">
             {group.url}
           </div>
+
+          {proofCount > 0 && (
+            <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+              <span className="inline-flex items-center gap-1 font-medium">
+                <Lock className="h-3 w-3" /> TLSNotary provenance ·{" "}
+                {provenCount}/{proofCount} scan{proofCount > 1 ? "s" : ""}{" "}
+                cryptographically proven
+              </span>
+              <div className="mt-0.5">
+                Each proof attests the target host served the HTML over TLS
+                (notary-signed). Payout is gated on independent verification —
+                not on trusting the scanner.
+              </div>
+            </div>
+          )}
 
           {cloaking && (
             <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
@@ -247,13 +271,14 @@ function VantageBlock({
   const dAppKit = useDAppKit();
   const queryClient = useQueryClient();
   const { packageId } = useScanConfig();
-  const creVerdicts = useCreVerdicts();
-  const creVerdict = verdictForJob(creVerdicts, job.id);
 
   const [imgFailed, setImgFailed] = useState(false);
   const sub = job.submissions[0];
   const imgUrl = sub ? walrusAggregatorUrl(sub.screenshot_blob_id) : null;
   const htmlUrl = sub ? walrusAggregatorUrl(sub.html_blob_id) : null;
+  const proofUrl = sub?.notary_proof_blob_id
+    ? walrusAggregatorUrl(sub.notary_proof_blob_id)
+    : null;
   const cluster = sub?.content_hash ? clusterOf(sub.content_hash) : null;
   const DeviceIcon =
     parseParams(job.params).device === "desktop" ? Monitor : Smartphone;
@@ -326,7 +351,7 @@ function VantageBlock({
         ) : (
           <div className="text-amber-700">awaiting scan</div>
         )}
-        {creVerdict && <CreBadge status={creVerdict.status} />}
+        {sub && <NotaryBadge submission={sub} />}
         {sub?.content_hash && (
           <div className="break-all font-mono text-[10px] text-muted-foreground">
             {sub.content_hash.slice(0, 16)}…
@@ -350,6 +375,16 @@ function VantageBlock({
                 className="text-[var(--color-ring)] hover:underline"
               >
                 html
+              </a>
+            )}
+            {proofUrl && (
+              <a
+                href={proofUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-0.5 text-violet-700 hover:underline"
+              >
+                <FileCheck2 className="h-3 w-3" /> TLS proof
               </a>
             )}
           </div>
@@ -395,16 +430,39 @@ function SubStatus({
   return <div className="text-amber-700">awaiting verification</div>;
 }
 
-function CreBadge({ status }: { status: string }) {
-  if (status === "VERIFIED")
+// Surfaces the TLSNotary provenance layer: whether the scanner attached a proof
+// that the target host actually served the HTML over TLS, and how it resolved.
+function NotaryBadge({ submission }: { submission: Submission }) {
+  if (!submission.notary_proof_blob_id)
     return (
-      <span className="inline-flex items-center gap-1 text-emerald-700">
-        <ShieldCheck className="h-3 w-3" /> verified
+      <span
+        className="inline-flex items-center gap-1 text-muted-foreground"
+        title="No TLSNotary proof attached — evidence trusted via Walrus re-fetch heuristic only"
+      >
+        <ShieldX className="h-3 w-3" /> no TLS proof
+      </span>
+    );
+  if (submission.status === SUB_APPROVED)
+    return (
+      <span
+        className="inline-flex items-center gap-1 font-medium text-violet-700"
+        title="TLSNotary proof verified: the target host served this HTML over TLS, notary-signed"
+      >
+        <Lock className="h-3 w-3" /> TLS-proven · notary-signed
+      </span>
+    );
+  if (submission.status === SUB_REJECTED)
+    return (
+      <span
+        className="inline-flex items-center gap-1 text-red-700"
+        title="TLSNotary proof failed provenance verification"
+      >
+        <ShieldX className="h-3 w-3" /> TLS proof rejected
       </span>
     );
   return (
-    <span className="inline-flex items-center gap-1 text-red-600">
-      <ShieldX className="h-3 w-3" /> rejected
+    <span className="inline-flex items-center gap-1 text-amber-700">
+      <Lock className="h-3 w-3" /> TLS proof · verifying
     </span>
   );
 }

@@ -17,6 +17,7 @@ import {
 } from "../src/contracts/scan_market/scan_market";
 import { uploadToWalrus } from "../src/lib/walrus";
 import { checkPolicy } from "../src/lib/vetting";
+import { TlsnHarness } from "./tlsn/harness";
 import {
   TESTNET_SCAN_MARKET_PACKAGE_ID,
   TESTNET_MARKET_ID,
@@ -27,6 +28,13 @@ const MARKET = process.env.SCAN_MARKET ?? TESTNET_MARKET_ID!;
 const RPC = process.env.SUI_RPC ?? "https://fullnode.testnet.sui.io:443";
 const WALRUS_PUBLISHER = process.env.WALRUS_PUBLISHER;
 const POLL_MS = Number(process.env.POLL_MS ?? 4000);
+
+// TLSNotary: when enabled, the node also produces a real proof that the HTML was
+// served by the target host over TLS, uploads the presentation to Walrus, and
+// anchors that blob id on-chain. Requires a reachable notary (TLSN_NOTARY_URL)
+// and a TLS 1.2-capable target (tlsn alpha.12 limitation).
+const TLSN_ENABLED = /^(1|true|yes)$/i.test(process.env.TLSN_ENABLED ?? "");
+const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? "http://127.0.0.1:7047";
 
 // A node serves exactly one vantage (geo / device / browser) and only claims
 // jobs whose params match it. SCANNER_PROFILE selects the device; SCANNER_BROWSER
@@ -68,7 +76,11 @@ const DEVICE_DESCRIPTOR: Record<string, string | null> = {
 const CAP = {
   geo: (process.env.SCANNER_GEO ?? "US").toLowerCase(),
   device: DEVICE_DESCRIPTOR[PROFILE] !== undefined ? PROFILE : "desktop",
-  browser: (process.env.SCANNER_BROWSER ?? DEFAULT_BROWSER[PROFILE] ?? "chrome").toLowerCase(),
+  browser: (
+    process.env.SCANNER_BROWSER ??
+    DEFAULT_BROWSER[PROFILE] ??
+    "chrome"
+  ).toLowerCase(),
 };
 const CAP_ENGINE: Engine = ENGINE_OF[CAP.browser] ?? "chromium";
 
@@ -181,12 +193,48 @@ async function capture(
   return { screenshot, html };
 }
 
-async function submit(jobId: string, ssBlob: string, htmlBlob: string) {
+let tlsnHarness: TlsnHarness | null = null;
+
+// Best-effort TLSNotary proof of the target URL. Returns the Walrus blob id of
+// the presentation, or "" if proving is disabled/unavailable (e.g. TLS 1.3).
+const PROOF_TIMEOUT_MS = Number(process.env.TLSN_PROOF_TIMEOUT_MS ?? 90000);
+
+async function proveAndUpload(url: string): Promise<string> {
+  if (!tlsnHarness) return "";
+  try {
+    const { presentationJSON } = await tlsnHarness.prove(
+      url,
+      16384,
+      PROOF_TIMEOUT_MS,
+    );
+    const proofBlob = await uploadToWalrus(JSON.stringify(presentationJSON), {
+      publisher: WALRUS_PUBLISHER,
+      contentType: "application/json",
+    });
+    console.log(`  TLSNotary proof uploaded to Walrus: ${proofBlob}`);
+    return proofBlob;
+  } catch (err) {
+    console.warn(`  TLSNotary proof skipped: ${(err as Error).message}`);
+    return "";
+  }
+}
+
+async function submit(
+  jobId: string,
+  ssBlob: string,
+  htmlBlob: string,
+  proofBlob: string,
+) {
   const tx = new Transaction();
   tx.add(
     submitScan({
       package: PKG,
-      arguments: { job: jobId, screenshotBlobId: ssBlob, htmlBlobId: htmlBlob },
+      arguments: {
+        job: jobId,
+        screenshotBlobId: ssBlob,
+        htmlBlobId: htmlBlob,
+        notaryProofBlobId: proofBlob,
+      },
     }),
   );
   const res = await client.signAndExecuteTransaction({
@@ -208,6 +256,12 @@ async function main() {
   console.log(`Package=${PKG}\nMarket=${MARKET}\nPolling every ${POLL_MS}ms…`);
   const browser = await ENGINES[CAP_ENGINE].launch({ headless: true });
 
+  if (TLSN_ENABLED) {
+    tlsnHarness = new TlsnHarness({ notaryUrl: TLSN_NOTARY_URL });
+    await tlsnHarness.start();
+    console.log(`TLSNotary proving ON · notary=${TLSN_NOTARY_URL}`);
+  }
+
   const tick = async () => {
     try {
       const jobs = await getJobIds();
@@ -227,10 +281,14 @@ async function main() {
         handled.add(jobId);
         const policy = checkPolicy(claim.url);
         if (!policy.allowed) {
-          console.log(`  skipping policy-denied URL: ${claim.url} (${policy.reason})`);
+          console.log(
+            `  skipping policy-denied URL: ${claim.url} (${policy.reason})`,
+          );
           continue;
         }
-        console.log(`\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`);
+        console.log(
+          `\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`,
+        );
         const { screenshot, html } = await capture(browser, claim.url);
         const ssBlob = await uploadToWalrus(screenshot, {
           publisher: WALRUS_PUBLISHER,
@@ -243,7 +301,8 @@ async function main() {
         console.log(
           `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
         );
-        const digest = await submit(jobId, ssBlob, htmlBlob);
+        const proofBlob = await proveAndUpload(claim.url);
+        const digest = await submit(jobId, ssBlob, htmlBlob, proofBlob);
         console.log(`  submitted (pending verification) · digest=${digest}`);
       }
     } catch (err) {

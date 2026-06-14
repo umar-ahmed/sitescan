@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Proof of Scan — TLSNotary prover</title>
+  </head>
+  <body>
+    <pre id="log">loading…</pre>
+    <script>
+      (function () {
+        const log = (m) => {
+          const el = document.getElementById("log");
+          el.textContent += "\n" + m;
+          console.log(m);
+        };
+
+        // The heavy MPC must run off the main thread (blocking Atomics).
+        const worker = new Worker("/prover.worker.js");
+        let pending = null;
+        worker.onmessage = (e) => {
+          if (!pending) return;
+          const { resolve, reject } = pending;
+          pending = null;
+          if (e.data.ok) resolve(e.data.result);
+          else reject(new Error(e.data.error));
+        };
+        worker.onerror = (e) => {
+          log("worker error: " + e.message);
+          if (pending) {
+            pending.reject(new Error(e.message));
+            pending = null;
+          }
+        };
+
+        window.tlsnCall = (args) =>
+          new Promise((resolve, reject) => {
+            pending = { resolve, reject };
+            worker.postMessage(args);
+          });
+        window.runProof = (args) => window.tlsnCall({ cmd: "prove", ...args });
+        window.verifyProof = (presentationJSON) =>
+          window.tlsnCall({ cmd: "verify", presentationJSON });
+
+        log("prover worker spawned");
+      })();
+    </script>
+  </body>
+</html>

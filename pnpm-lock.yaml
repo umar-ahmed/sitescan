@@ -35,6 +35,12 @@ importers:
       tailwind-merge:
         specifier: ^3.4.0
         version: 3.6.0
+      tlsn-js:
+        specifier: 0.1.0-alpha.12.0
+        version: 0.1.0-alpha.12.0
+      ws:
+        specifier: ^8.21.0
+        version: 8.21.0
     devDependencies:
       '@mysten/codegen':
         specifier: ^0.10.6
@@ -48,6 +54,9 @@ importers:
       '@types/react-dom':
         specifier: ^19.2.3
         version: 19.2.3(@types/react@19.2.17)
+      '@types/ws':
+        specifier: ^8.18.1
+        version: 8.18.1
       '@vitejs/plugin-react-swc':
         specifier: ^4.2.2
         version: 4.3.1(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))
@@ -729,6 +738,9 @@ packages:
   '@types/trusted-types@2.0.7':
     resolution: {integrity: sha512-ScaPdn1dQczgbl0QFTeTOmVHFULt394XJgOQNoyVhZ6r2vLnMLJfBPd53SB52T/3G36VI1/g2MZaX0cwDuXsfw==}
 
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
+
   '@vitejs/plugin-react-swc@4.3.1':
     resolution: {integrity: sha512-PaeokKjAGraNN+s5SIApgsktnJprIyt3zgEIu7awnEdfn29QiB2crTcCzyi2XGpX9rUnTc0cKU07Wm0N0g7H2w==}
     engines: {node: ^20.19.0 || >=22.12.0}
@@ -1069,6 +1081,14 @@ packages:
     resolution: {integrity: sha512-wXR/dYpcqKmfWpEdZjiKJOwCNFndD0DMnrW/cYjVGttEkBfVgcLFHoNrlj47mjOVic9yyNu65alsgF4NQyTa2g==}
     engines: {node: '>=12.0.0'}
 
+  tlsn-js@0.1.0-alpha.12.0:
+    resolution: {integrity: sha512-un2ImvRjZ8d3BypReHJkC58NV1JPIppIhDrPLeR75+1uSsv805fSBruBtIYHklnLZQX38iyMJdDf+BEz7Z4nZQ==}
+    engines: {node: '>= 16.20.2'}
+    deprecated: 'This package is deprecated. Check the tlsn-extension repository instead: https://github.com/tlsnotary/tlsn-extension'
+
+  tlsn-wasm@0.1.0-alpha.12:
+    resolution: {integrity: sha512-0HlhM466ewogualMmpevFAgfWfUh1qwt/RjbOKSQiE+EPK99x8BrMBlChAxjnCxWpuUaDfaVEXTEPF07RYBtuQ==}
+
   toml@3.0.0:
     resolution: {integrity: sha512-y/mWCZinnvxjTKYhJ+pYxwD0mRLVvOtdS2Awbgxln6iEnt4rk0yBxeSBHkGJcPucRiG0e55mwWp+g/05rsrd6w==}
 
@@ -1137,6 +1157,18 @@ packages:
       tsx:
         optional: true
       yaml:
+        optional: true
+
+  ws@8.21.0:
+    resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
         optional: true
 
   zod@4.4.3:
@@ -1682,6 +1714,10 @@ snapshots:
 
   '@types/trusted-types@2.0.7': {}
 
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 25.9.3
+
   '@vitejs/plugin-react-swc@4.3.1(vite@8.0.16(@types/node@25.9.3)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.22.4))':
     dependencies:
       '@rolldown/pluginutils': 1.0.1
@@ -2013,6 +2049,12 @@ snapshots:
       fdir: 6.5.0(picomatch@4.0.4)
       picomatch: 4.0.4
 
+  tlsn-js@0.1.0-alpha.12.0:
+    dependencies:
+      tlsn-wasm: 0.1.0-alpha.12
+
+  tlsn-wasm@0.1.0-alpha.12: {}
+
   toml@3.0.0: {}
 
   tslib@2.8.1:
@@ -2045,5 +2087,7 @@ snapshots:
       fsevents: 2.3.3
       jiti: 2.7.0
       tsx: 4.22.4
+
+  ws@8.21.0: {}
 
   zod@4.4.3: {}

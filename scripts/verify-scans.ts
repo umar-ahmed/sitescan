@@ -11,8 +11,13 @@ import {
   resolveScan,
   setCloaking,
 } from "../src/contracts/scan_market/scan_market";
-import { DEFAULT_WALRUS_AGGREGATOR } from "../src/lib/walrus";
+import {
+  DEFAULT_WALRUS_AGGREGATOR,
+  walrusAggregatorUrl,
+} from "../src/lib/walrus";
 import { type JobVerdict, type VerdictStore, vetJob } from "../src/lib/vetting";
+import { TlsnHarness, type PresentationJSON } from "./tlsn/harness";
+import { checkProvenance, notaryPemToKeyHex } from "../src/lib/tlsnotary";
 import {
   TESTNET_SCAN_MARKET_PACKAGE_ID,
   TESTNET_MARKET_ID,
@@ -30,6 +35,11 @@ const WALRUS_AGGREGATOR =
 const POLL_MS = Number(process.env.POLL_MS ?? 8000);
 const RUN_ONCE = process.argv.includes("--once");
 
+// TLSNotary: when enabled, a submission's payout is gated on a verifiable proof
+// that the target host served the HTML over TLS, signed by the trusted notary.
+const TLSN_ENABLED = /^(1|true|yes)$/i.test(process.env.TLSN_ENABLED ?? "");
+const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? "http://127.0.0.1:7047";
+
 const SUB_PENDING = 0;
 const STATUS_OPEN = 0;
 
@@ -41,10 +51,67 @@ const verifierKeypair = verifierSecret
   : null;
 const verifierAddress = verifierKeypair?.getPublicKey().toSuiAddress();
 
+let tlsnHarness: TlsnHarness | null = null;
+let trustedNotaryKeyHex = "";
+
+async function fetchTrustedNotaryKey(): Promise<string> {
+  const res = await fetch(`${TLSN_NOTARY_URL}/info`);
+  const info = (await res.json()) as { publicKey: string };
+  return notaryPemToKeyHex(info.publicKey);
+}
+
+interface ProofVerdict {
+  approve: boolean;
+  reason: string;
+  contentHash: string;
+}
+
+// Download the presentation from Walrus and re-run the deterministic provenance
+// check (notary signature + proven host + HTML). This is the payout gate.
+async function verifyProof(
+  jobUrl: string,
+  proofBlobId: string,
+): Promise<ProofVerdict> {
+  if (!tlsnHarness) {
+    return {
+      approve: false,
+      reason: "Verifier has no notary configured",
+      contentHash: "",
+    };
+  }
+  try {
+    const res = await fetch(
+      walrusAggregatorUrl(proofBlobId, WALRUS_AGGREGATOR),
+      {
+        signal: AbortSignal.timeout(45000),
+      },
+    );
+    if (!res.ok) throw new Error(`Walrus fetch ${res.status}`);
+    const presentationJSON = (await res.json()) as PresentationJSON;
+    const verified = await tlsnHarness.verify(presentationJSON);
+    const provenance = await checkProvenance(verified, {
+      expectedHost: new URL(jobUrl).hostname,
+      trustedNotaryKeyHex,
+    });
+    return {
+      approve: provenance.status === "PROVEN",
+      reason: provenance.reason,
+      contentHash: provenance.htmlContentHash ?? "",
+    };
+  } catch (err) {
+    return {
+      approve: false,
+      reason: `TLSNotary verification failed: ${(err as Error).message}`,
+      contentHash: "",
+    };
+  }
+}
+
 interface ChainSubmission {
   index: number;
   screenshot_blob_id: string;
   html_blob_id: string;
+  notary_proof_blob_id: string;
   status: number;
 }
 
@@ -68,6 +135,7 @@ async function loadJobs(): Promise<ChainJob[]> {
       index,
       screenshot_blob_id: s.screenshot_blob_id,
       html_blob_id: s.html_blob_id,
+      notary_proof_blob_id: s.notary_proof_blob_id,
       status: Number(s.status),
     })),
   }));
@@ -100,9 +168,20 @@ async function resolveOnChain(
   if (!verifierKeypair) return;
   if (job.status !== STATUS_OPEN) return;
 
-  const decisions = job.submissions
-    .filter((s) => s.status === SUB_PENDING)
-    .map((s) => {
+  const pending = job.submissions.filter((s) => s.status === SUB_PENDING);
+  const decisions = await Promise.all(
+    pending.map(async (s) => {
+      // A submission carrying a TLSNotary proof is gated on cryptographic
+      // provenance; otherwise fall back to the Walrus re-fetch heuristic.
+      if (TLSN_ENABLED && s.notary_proof_blob_id) {
+        const proof = await verifyProof(job.url, s.notary_proof_blob_id);
+        return {
+          index: s.index,
+          approve: proof.approve,
+          reason: proof.reason,
+          contentHash: proof.contentHash,
+        };
+      }
       const sv = verdict.submissions[s.index];
       const approve = sv?.status === "VERIFIED";
       return {
@@ -113,7 +192,8 @@ async function resolveOnChain(
           (approve ? "Evidence verified via Walrus re-fetch" : "Rejected"),
         contentHash: sv?.htmlContentHash ?? "",
       };
-    });
+    }),
+  );
   if (decisions.length === 0) return;
 
   const tx = new Transaction();
@@ -197,6 +277,14 @@ async function main() {
       "No VERIFIER_SECRET_KEY set — read-only mode (writes verdicts, no on-chain payout).",
     );
   }
+  if (TLSN_ENABLED) {
+    trustedNotaryKeyHex = await fetchTrustedNotaryKey();
+    tlsnHarness = new TlsnHarness({ notaryUrl: TLSN_NOTARY_URL });
+    await tlsnHarness.start();
+    console.log(
+      `TLSNotary gating ON · notary=${TLSN_NOTARY_URL} · key=${trustedNotaryKeyHex.slice(0, 14)}…`,
+    );
+  }
   if (RUN_ONCE) {
     console.log("Mode: single pass (--once)\n");
   } else {
@@ -206,7 +294,10 @@ async function main() {
   let cache: Record<string, JobVerdict> = {};
   cache = await tick(cache);
 
-  if (RUN_ONCE) return;
+  if (RUN_ONCE) {
+    await tlsnHarness?.stop();
+    return;
+  }
 
   setInterval(() => {
     tick(cache)
