@@ -261,10 +261,20 @@ async function capture(
 // Open a real, visible browser so a human can solve the challenge, then capture
 // the unblocked page. Resolves with the post-solve evidence, or null if the
 // person didn't confirm in time (in which case the caller skips the job).
+interface SolvedCaptcha {
+  screenshot: Buffer;
+  html: string;
+  // The exact credentials the human earned clearing the bot-wall, so the
+  // TLSNotary prover can replay an authenticated request (cf_clearance etc. are
+  // bound to the User-Agent that solved them).
+  cookies: string;
+  userAgent: string;
+}
+
 async function humanSolveCaptcha(
   url: string,
   provider: string,
-): Promise<{ screenshot: Buffer; html: string } | null> {
+): Promise<SolvedCaptcha | null> {
   console.log(`\n  🧩 ${provider} CAPTCHA detected on ${url}`);
   console.log(
     "  Opening a real Chrome window — solve the challenge, then press Enter here.",
@@ -325,8 +335,13 @@ async function humanSolveCaptcha(
       return null;
     }
     const screenshot = await page.screenshot({ type: "png", fullPage: false });
-    console.log("  ✓ Challenge cleared — captured the unblocked page.");
-    return { screenshot, html };
+    const jar = await context.cookies(url);
+    const cookies = jar.map((c) => `${c.name}=${c.value}`).join("; ");
+    const userAgent = await page.evaluate(() => navigator.userAgent);
+    console.log(
+      `  ✓ Challenge cleared — captured the unblocked page (${jar.length} cookie(s) to reuse for the proof).`,
+    );
+    return { screenshot, html, cookies, userAgent };
   } finally {
     await context.close().catch(() => undefined);
     await rm(userDataDir, { recursive: true, force: true }).catch(
@@ -347,13 +362,17 @@ const PROOF_TIMEOUT_MS = Number(process.env.TLSN_PROOF_TIMEOUT_MS ?? 90000);
 // 50KB+). Larger values cost more MPC time + memory, so it's tunable.
 const TLSN_MAX_RECV = Number(process.env.TLSN_MAX_RECV ?? 131072);
 
-async function proveAndUpload(url: string): Promise<string> {
+async function proveAndUpload(
+  url: string,
+  creds: { cookies?: string; userAgent?: string } = {},
+): Promise<string> {
   if (!tlsnHarness) return "";
   try {
     const { presentationJSON } = await tlsnHarness.prove(
       url,
       TLSN_MAX_RECV,
       PROOF_TIMEOUT_MS,
+      creds,
     );
     const proofBlob = await uploadToWalrus(JSON.stringify(presentationJSON), {
       publisher: WALRUS_PUBLISHER,
@@ -457,6 +476,7 @@ async function main() {
 
       // Bot-wall / CAPTCHA: the headless capture can't get past it, so hand off
       // to a human in a real browser and re-capture the unblocked page.
+      let proofCreds: { cookies?: string; userAgent?: string } = {};
       const captcha = detectCaptcha(html);
       if (captcha) {
         if (!HITL_ENABLED) {
@@ -469,6 +489,7 @@ async function main() {
         if (!solved) return;
         screenshot = solved.screenshot;
         html = solved.html;
+        proofCreds = { cookies: solved.cookies, userAgent: solved.userAgent };
       }
       console.log(
         `  ✓ captured page · ${(html.length / 1024).toFixed(1)} KB html · ${(screenshot.length / 1024).toFixed(1)} KB screenshot`,
@@ -479,7 +500,7 @@ async function main() {
         console.log(
           `  → generating TLSNotary proof via ${TLSN_NOTARY_URL} (up to ${Math.round(PROOF_TIMEOUT_MS / 1000)}s)…`,
         );
-        proofBlob = await proveAndUpload(scanUrl);
+        proofBlob = await proveAndUpload(scanUrl, proofCreds);
         if (!proofBlob) {
           console.warn(
             `  ✗ no TLSNotary proof for ${scanUrl} — not submitting (TLSNotary required, no fallback)`,
