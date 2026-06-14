@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useCurrentAccount, useCurrentClient } from "@mysten/dapp-kit-react";
 import { useQuery } from "@tanstack/react-query";
+import { Loader2, Wallet, Radar } from "lucide-react";
 import { Market, ScanJob } from "./contracts/scan_market/scan_market";
 import { useScanConfig } from "./lib/config";
 import { ScanGroup, type Job, type ScanGroupData } from "./ScanGroup";
@@ -96,8 +97,8 @@ export function JobBoard() {
 
       {isPending ? (
         <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            Loading scans…
+          <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" /> Loading scans…
           </CardContent>
         </Card>
       ) : error ? (
@@ -106,14 +107,22 @@ export function JobBoard() {
             {(error as Error).message}
           </CardContent>
         </Card>
+      ) : tab === "mine" && !account ? (
+        <EmptyState
+          icon={<Wallet className="h-5 w-5" />}
+          title="Connect your wallet"
+          body="Connect your wallet to see the scans you've launched."
+        />
       ) : shown.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-sm text-muted-foreground">
-            {tab === "mine"
-              ? "You haven't scanned anything yet. Paste a URL above to start."
-              : "No scans yet."}
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={<Radar className="h-5 w-5" />}
+          title={tab === "mine" ? "No scans yet" : "No scans on the network yet"}
+          body={
+            tab === "mine"
+              ? "Paste a URL in the field above to launch your first scan."
+              : "Be the first — paste a URL above to launch a scan."
+          }
+        />
       ) : (
         <div className="space-y-2">
           {shown.map((g) => (
@@ -122,6 +131,28 @@ export function JobBoard() {
         </div>
       )}
     </div>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  body,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  body: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex flex-col items-center gap-2 py-12 text-center">
+        <div className="grid h-10 w-10 place-items-center rounded-full bg-muted text-muted-foreground">
+          {icon}
+        </div>
+        <div className="text-sm font-medium text-foreground">{title}</div>
+        <p className="max-w-xs text-xs text-muted-foreground">{body}</p>
+      </CardContent>
+    </Card>
   );
 }
 

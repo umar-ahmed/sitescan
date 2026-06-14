@@ -332,7 +332,7 @@ function VantageBlock({
           </div>
         ) : (
           <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-            <Loader2 className="mr-1 h-3 w-3 animate-spin" /> waiting for a node
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" /> awaiting a node
           </div>
         )}
         {cluster && (
@@ -350,7 +350,7 @@ function VantageBlock({
         {sub ? (
           <SubStatus status={sub.status} paid={sub.paid} />
         ) : (
-          <div className="text-amber-700">awaiting scan</div>
+          <div className="text-amber-300">awaiting a node</div>
         )}
         {sub && <NotaryBadge submission={sub} />}
         {sub?.content_hash && (
