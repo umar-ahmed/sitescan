@@ -255,7 +255,11 @@ export function ScanExperience() {
               <UrlStep
                 url={url}
                 setUrl={setUrl}
-                onNext={() => url && setStep("regions")}
+                onNext={() => {
+                  if (!url) return;
+                  if (!/^https?:\/\//i.test(url)) setUrl("https://" + url);
+                  setStep("regions");
+                }}
               />
             </Slide>
           )}
