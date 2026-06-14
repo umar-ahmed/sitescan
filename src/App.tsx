@@ -1,6 +1,7 @@
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
 import { ScanExperience } from "./ScanExperience";
 import { JobBoard } from "./JobBoard";
+import { DeploymentInfo } from "./DeploymentInfo";
 import { Radar, Lock } from "lucide-react";
 
 function App() {
@@ -49,6 +50,8 @@ function App() {
           <JobBoard />
         </div>
       </main>
+
+      <DeploymentInfo />
     </div>
   );
 }
