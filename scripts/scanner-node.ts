@@ -17,7 +17,7 @@ import {
 } from "../src/contracts/scan_market/scan_market";
 import { uploadToWalrus } from "../src/lib/walrus";
 import { checkPolicy } from "../src/lib/vetting";
-import { TlsnHarness } from "./tlsn/harness";
+import { TlsnHarness, DEFAULT_NOTARY_URL } from "./tlsn/harness";
 import {
   TESTNET_SCAN_MARKET_PACKAGE_ID,
   TESTNET_MARKET_ID,
@@ -34,7 +34,7 @@ const POLL_MS = Number(process.env.POLL_MS ?? 4000);
 // anchors that blob id on-chain. Requires a reachable notary (TLSN_NOTARY_URL)
 // and a TLS 1.2-capable target (tlsn alpha.12 limitation).
 const TLSN_ENABLED = /^(1|true|yes)$/i.test(process.env.TLSN_ENABLED ?? "");
-const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? "http://127.0.0.1:7047";
+const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? DEFAULT_NOTARY_URL;
 
 // A node serves exactly one vantage (geo / device / browser) and only claims
 // jobs whose params match it. SCANNER_PROFILE selects the device; SCANNER_BROWSER

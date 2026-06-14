@@ -76,13 +76,13 @@ torn down by the `pnpm scan` / `pnpm verify` processes. Proofs are TLS 1.2 only
 
 ### Quick check (no chain, ~15s)
 
-```bash
-# point at the hosted notary (skip Docker), or run `pnpm tlsn:notary` locally
-export TLSN_NOTARY_URL="https://proof-of-scan-notary-production.up.railway.app"
+Uses the hosted notary by default — no Docker needed.
 
+```bash
 pnpm tlsn:prove "https://example.com/"              # real MPC proof → scripts/tlsn/out/…
 pnpm tlsn:verify scripts/tlsn/out/example.com.presentation.json example.com
 # → PROVEN — TLS provenance verified: example.com served HTTP 200, notary-signed
+# local notary instead? `pnpm tlsn:notary` then export TLSN_NOTARY_URL=http://127.0.0.1:7047
 ```
 
 ### Full demo (5 terminals)
@@ -97,13 +97,13 @@ pnpm install
 pnpm exec playwright install chromium
 export SUI_SECRET_KEY="$(sui keytool export --key-identity $(sui client active-address) --json | node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>process.stdout.write(JSON.parse(s).exportedPrivateKey))')"
 export VERIFIER_SECRET_KEY="$SUI_SECRET_KEY"   # publisher key = the on-chain verifier
-# use the hosted notary (skip terminal 1), or omit to default to local Docker
-export TLSN_NOTARY_URL="https://proof-of-scan-notary-production.up.railway.app"
+# notary defaults to the hosted instance; for a local one:
+#   pnpm tlsn:notary && export TLSN_NOTARY_URL=http://127.0.0.1:7047
 ```
 
 | #   | Terminal       | Command                                                                 |
 | --- | -------------- | ----------------------------------------------------------------------- |
-| 1   | **Notary**     | `pnpm tlsn:notary` (local; skip if using hosted `TLSN_NOTARY_URL`)      |
+| 1   | **Notary**     | hosted by default (no terminal needed) — or `pnpm tlsn:notary` locally  |
 | 2   | **Web UI**     | `pnpm dev` → http://localhost:5173                                      |
 | 3   | **Post a job** | `./scripts/post-job.sh "https://example.com/" 0.02 1 US desktop chrome` |
 | 4   | **Scanner**    | `TLSN_ENABLED=1 SUI_SECRET_KEY=$SUI_SECRET_KEY pnpm scan`               |
@@ -115,8 +115,8 @@ on-chain. The verifier fetches the presentation from Walrus, re-verifies
 provenance against the notary key, and **releases payout only if the proof
 checks out** — writing the verdict into the submission's `verdict_reason` +
 `content_hash`. The web UI shows the **TLS-proven · notary-signed** badge and a
-link to the proof. `TLSN_NOTARY_URL` overrides the notary location (default
-`http://127.0.0.1:7047`).
+link to the proof. The notary defaults to the hosted instance; set
+`TLSN_NOTARY_URL=http://127.0.0.1:7047` to use a local `pnpm tlsn:notary`.
 
 ## Prerequisites
 

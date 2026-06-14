@@ -16,7 +16,11 @@ import {
   walrusAggregatorUrl,
 } from "../src/lib/walrus";
 import { type JobVerdict, type VerdictStore, vetJob } from "../src/lib/vetting";
-import { TlsnHarness, type PresentationJSON } from "./tlsn/harness";
+import {
+  TlsnHarness,
+  DEFAULT_NOTARY_URL,
+  type PresentationJSON,
+} from "./tlsn/harness";
 import { checkProvenance, notaryPemToKeyHex } from "../src/lib/tlsnotary";
 import {
   TESTNET_SCAN_MARKET_PACKAGE_ID,
@@ -38,7 +42,7 @@ const RUN_ONCE = process.argv.includes("--once");
 // TLSNotary: when enabled, a submission's payout is gated on a verifiable proof
 // that the target host served the HTML over TLS, signed by the trusted notary.
 const TLSN_ENABLED = /^(1|true|yes)$/i.test(process.env.TLSN_ENABLED ?? "");
-const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? "http://127.0.0.1:7047";
+const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? DEFAULT_NOTARY_URL;
 
 const SUB_PENDING = 0;
 const STATUS_OPEN = 0;

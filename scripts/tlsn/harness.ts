@@ -6,6 +6,12 @@ import net from "node:net";
 import { WebSocketServer } from "ws";
 import { chromium, type Browser } from "playwright";
 
+// Default to the hosted notary (pinned signing key) so the scanner and verifier
+// agree on the same notary without extra config. Override with TLSN_NOTARY_URL
+// (e.g. http://127.0.0.1:7047 for a local `pnpm tlsn:notary`).
+export const DEFAULT_NOTARY_URL =
+  "https://proof-of-scan-notary-production.up.railway.app";
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TLSN_BUILD = join(HERE, "..", "..", "node_modules", "tlsn-js", "build");
 const PROVER_HTML = join(HERE, "prover.html");
@@ -68,7 +74,7 @@ export class TlsnHarness {
   private wsPort = 0;
 
   constructor(opts: HarnessOptions = {}) {
-    this.notaryUrl = opts.notaryUrl ?? "http://127.0.0.1:7047";
+    this.notaryUrl = opts.notaryUrl ?? DEFAULT_NOTARY_URL;
     this.debug = opts.debug ?? Boolean(process.env.TLSN_DEBUG);
   }
 

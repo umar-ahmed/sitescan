@@ -1,13 +1,15 @@
 import { readFile } from "node:fs/promises";
-import { TlsnHarness, type PresentationJSON } from "./tlsn/harness";
+import {
+  TlsnHarness,
+  DEFAULT_NOTARY_URL,
+  type PresentationJSON,
+} from "./tlsn/harness";
 import { checkProvenance, notaryPemToKeyHex } from "../src/lib/tlsnotary";
 
 const FILE = process.argv[2];
 const EXPECTED_HOST = process.argv[3];
 const NOTARY_URL =
-  process.env.TLSN_NOTARY_URL ??
-  process.env.NOTARY_URL ??
-  "http://127.0.0.1:7047";
+  process.env.TLSN_NOTARY_URL ?? process.env.NOTARY_URL ?? DEFAULT_NOTARY_URL;
 
 if (!FILE) {
   console.error(

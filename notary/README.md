@@ -19,14 +19,16 @@ railway up                   # builds the Dockerfile and deploys
 railway domain               # generate a public https domain
 ```
 
-Then repoint the marketplace at it (one env var does scanner + verifier):
+The marketplace already defaults to this hosted notary (`DEFAULT_NOTARY_URL` in
+`scripts/tlsn/harness.ts`), so the scanner and verifier agree without extra
+config:
 
 ```bash
-export TLSN_NOTARY_URL="https://<your-notary>.up.railway.app"
-
 TLSN_ENABLED=1 SUI_SECRET_KEY=…      pnpm scan
 TLSN_ENABLED=1 VERIFIER_SECRET_KEY=… pnpm verify
 ```
+
+To point at a different notary, set `TLSN_NOTARY_URL` for both.
 
 Sanity check the live notary:
 

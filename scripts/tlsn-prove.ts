@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { TlsnHarness } from "./tlsn/harness";
+import { TlsnHarness, DEFAULT_NOTARY_URL } from "./tlsn/harness";
 import { checkProvenance, notaryPemToKeyHex } from "../src/lib/tlsnotary";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -10,9 +10,7 @@ const OUT =
   process.argv[3] ??
   join(HERE, "tlsn", "out", `${new URL(TARGET).hostname}.presentation.json`);
 const NOTARY_URL =
-  process.env.TLSN_NOTARY_URL ??
-  process.env.NOTARY_URL ??
-  "http://127.0.0.1:7047";
+  process.env.TLSN_NOTARY_URL ?? process.env.NOTARY_URL ?? DEFAULT_NOTARY_URL;
 
 async function main() {
   console.log(`TLSNotary prove → ${TARGET}`);
