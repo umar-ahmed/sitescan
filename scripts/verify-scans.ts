@@ -41,7 +41,9 @@ const RUN_ONCE = process.argv.includes("--once");
 
 // TLSNotary: when enabled, a submission's payout is gated on a verifiable proof
 // that the target host served the HTML over TLS, signed by the trusted notary.
-const TLSN_ENABLED = /^(1|true|yes)$/i.test(process.env.TLSN_ENABLED ?? "");
+const TLSN_ENABLED = !/^(0|false|no|off)$/i.test(
+  process.env.TLSN_ENABLED ?? "1",
+);
 const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? DEFAULT_NOTARY_URL;
 
 const SUB_PENDING = 0;
@@ -160,9 +162,9 @@ function logVerdict(v: JobVerdict) {
     ? ` · cloaking=${v.cloakingDelta.clusters} cluster(s)`
     : "";
   console.log(
-    `[CRE verify] ${v.status} job=${v.jobId.slice(0, 10)}… url=${v.url}${delta}`,
+    `[verify] ${v.status} job=${v.jobId.slice(0, 10)}… url=${v.url}${delta}`,
   );
-  if (v.reason) console.log(`             ${v.reason}`);
+  if (v.reason) console.log(`         ${v.reason}`);
 }
 
 async function resolveOnChain(
@@ -208,6 +210,18 @@ async function resolveOnChain(
     }),
   );
   if (decisions.length === 0) return;
+
+  if (TLSN_ENABLED) {
+    const cloak = verdict.cloakingDelta
+      ? ` · cloaking=${verdict.cloakingDelta.clusters} cluster(s)`
+      : "";
+    console.log(`[verify] job=${job.id.slice(0, 10)}… url=${job.url}${cloak}`);
+    for (const d of decisions) {
+      console.log(
+        `         ${d.approve ? "PROVEN" : "NO PROOF"} scan #${d.index} — ${d.reason}`,
+      );
+    }
+  }
 
   const tx = new Transaction();
   for (const d of decisions) {
@@ -266,7 +280,10 @@ async function tick(existing: Record<string, JobVerdict>) {
       verifier: verifierAddress ? `oracle:${verifierAddress}` : "terminal-c",
     });
     next[job.id] = verdict;
-    logVerdict(verdict);
+    // When TLSNotary is the gate, resolveOnChain logs the proof-based verdict
+    // per submission; the heuristic vetJob output is only used for the cloaking
+    // delta + the UI verdict store, so don't print it as if it were the decision.
+    if (!TLSN_ENABLED) logVerdict(verdict);
     try {
       await resolveOnChain(job, verdict);
     } catch (err) {
@@ -279,7 +296,9 @@ async function tick(existing: Record<string, JobVerdict>) {
 }
 
 async function main() {
-  console.log("CRE verifier (Terminal C) — independent scan evidence vetting");
+  console.log(
+    "Proof-of-Scan verifier — TLSNotary provenance gate for scan payouts",
+  );
   console.log(`Market=${MARKET}`);
   console.log(`Walrus=${WALRUS_AGGREGATOR}`);
   console.log(`Verdicts → ${VERDICTS_PATH}`);
@@ -296,6 +315,10 @@ async function main() {
     await tlsnHarness.start();
     console.log(
       `TLSNotary gating ON · notary=${TLSN_NOTARY_URL} · key=${trustedNotaryKeyHex.slice(0, 14)}…`,
+    );
+  } else {
+    console.log(
+      "TLSNotary gating OFF (TLSN_ENABLED=0) — falling back to Walrus re-fetch heuristic.",
     );
   }
   if (RUN_ONCE) {

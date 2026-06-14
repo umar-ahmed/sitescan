@@ -106,8 +106,8 @@ export VERIFIER_SECRET_KEY="$SUI_SECRET_KEY"   # publisher key = the on-chain ve
 | 1   | **Notary**     | hosted by default (no terminal needed) — or `pnpm tlsn:notary` locally  |
 | 2   | **Web UI**     | `pnpm dev` → http://localhost:5173                                      |
 | 3   | **Post a job** | `./scripts/post-job.sh "https://example.com/" 0.02 1 US desktop chrome` |
-| 4   | **Scanner**    | `TLSN_ENABLED=1 SUI_SECRET_KEY=$SUI_SECRET_KEY pnpm scan`               |
-| 5   | **Verifier**   | `TLSN_ENABLED=1 VERIFIER_SECRET_KEY=$VERIFIER_SECRET_KEY pnpm verify`   |
+| 4   | **Scanner**    | `SUI_SECRET_KEY=$SUI_SECRET_KEY pnpm scan`                              |
+| 5   | **Verifier**   | `VERIFIER_SECRET_KEY=$VERIFIER_SECRET_KEY pnpm verify`                  |
 
 Flow: the scanner renders the page, produces a TLSNotary proof, uploads the
 screenshot + HTML + **presentation** to Walrus, and submits the proof blob id
@@ -115,7 +115,9 @@ on-chain. The verifier fetches the presentation from Walrus, re-verifies
 provenance against the notary key, and **releases payout only if the proof
 checks out** — writing the verdict into the submission's `verdict_reason` +
 `content_hash`. The web UI shows the **TLS-proven · notary-signed** badge and a
-link to the proof. The notary defaults to the hosted instance; set
+link to the proof. TLSNotary is **on by default** — a scan with no valid proof
+is rejected and never paid (set `TLSN_ENABLED=0` to fall back to the Walrus
+re-fetch heuristic). The notary defaults to the hosted instance; set
 `TLSN_NOTARY_URL=http://127.0.0.1:7047` to use a local `pnpm tlsn:notary`.
 
 ## Prerequisites

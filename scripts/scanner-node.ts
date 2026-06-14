@@ -33,7 +33,9 @@ const POLL_MS = Number(process.env.POLL_MS ?? 4000);
 // served by the target host over TLS, uploads the presentation to Walrus, and
 // anchors that blob id on-chain. Requires a reachable notary (TLSN_NOTARY_URL)
 // and a TLS 1.2-capable target (tlsn alpha.12 limitation).
-const TLSN_ENABLED = /^(1|true|yes)$/i.test(process.env.TLSN_ENABLED ?? "");
+const TLSN_ENABLED = !/^(0|false|no|off)$/i.test(
+  process.env.TLSN_ENABLED ?? "1",
+);
 const TLSN_NOTARY_URL = process.env.TLSN_NOTARY_URL ?? DEFAULT_NOTARY_URL;
 
 // A node serves exactly one vantage (geo / device / browser) and only claims
@@ -265,6 +267,10 @@ async function main() {
     tlsnHarness = new TlsnHarness({ notaryUrl: TLSN_NOTARY_URL });
     await tlsnHarness.start();
     console.log(`TLSNotary proving ON · notary=${TLSN_NOTARY_URL}`);
+  } else {
+    console.log(
+      "TLSNotary proving OFF (TLSN_ENABLED=0) — scans submitted without a proof will be rejected by the verifier.",
+    );
   }
 
   // Claim and fully process exactly one matching job (capture → prove → submit),
