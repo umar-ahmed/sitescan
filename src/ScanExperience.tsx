@@ -10,6 +10,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Transaction } from "@mysten/sui/transactions";
 import { postJob } from "./contracts/scan_market/scan_market";
 import { useScanConfig, suiToMist } from "./lib/config";
+import { isEnsName, ensToUrl } from "./lib/ens";
 import {
   Search,
   MapPin,
@@ -368,8 +369,8 @@ function UrlStep({
           Which site do you want to investigate?
         </h2>
         <p className="mx-auto mt-3 max-w-md text-sm text-white/60">
-          Enter a URL. Next you'll choose where in the world — and on what
-          devices — to view it from.
+          Enter a URL or ENS name. Next you'll choose where in the world — and
+          on what devices — to view it from.
         </p>
         <div className="mt-7 flex items-center gap-2 rounded-lg border border-white/20 bg-white/10 px-4 backdrop-blur focus-within:border-white/50">
           <Search className="h-5 w-5 shrink-0 text-white/60" />
@@ -378,10 +379,16 @@ function UrlStep({
             className="h-14 w-full bg-transparent text-base text-white outline-none placeholder:text-white/40"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://suspicious-site.com"
+            placeholder="https://suspicious-site.com  ·  or  name.eth"
             onKeyDown={(e) => e.key === "Enter" && onNext()}
           />
         </div>
+        {isEnsName(url) && (
+          <p className="mt-2 text-xs text-white/60">
+            ENS name — will scan{" "}
+            <span className="font-mono text-white/80">{ensToUrl(url)}</span>
+          </p>
+        )}
         <button
           disabled={!url}
           onClick={onNext}
