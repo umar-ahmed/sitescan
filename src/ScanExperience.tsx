@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   useCurrentAccount,
@@ -6,11 +6,13 @@ import {
   useDAppKit,
 } from "@mysten/dapp-kit-react";
 import { ConnectButton } from "@mysten/dapp-kit-react/ui";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Transaction } from "@mysten/sui/transactions";
-import { postJob } from "./contracts/scan_market/scan_market";
+import { postJob, Market, ScanJob } from "./contracts/scan_market/scan_market";
 import { useScanConfig, suiToMist } from "./lib/config";
 import { isEnsName, ensToUrl } from "./lib/ens";
+import { walrusAggregatorUrl } from "./lib/walrus";
+import type { Job } from "./ScanGroup";
 import {
   Search,
   MapPin,
@@ -20,6 +22,11 @@ import {
   Monitor,
   Radar,
   CheckCircle2,
+  Loader2,
+  ImageOff,
+  ShieldAlert,
+  RotateCcw,
+  Play,
 } from "lucide-react";
 
 const GlobeScene = lazy(() => import("./GlobeScene"));
@@ -42,7 +49,7 @@ const REGIONS: RegionT[] = [
   { code: "OCEANIA", name: "Oceania", lat: -25, lng: 140, coverage: 0 },
 ];
 
-type Step = "url" | "regions" | "device" | "review" | "launching";
+type Step = "url" | "regions" | "device" | "review" | "launching" | "results";
 
 // The scan device axis (what Playwright actually renders). "Mac" / "Windows"
 // aren't separate scans — they're a Desktop scan distinguished by the browser.
@@ -101,6 +108,7 @@ export function ScanExperience() {
   const [devices, setDevices] = useState<string[]>(["iphone"]);
   const [browsers, setBrowsers] = useState<string[]>(["safari"]);
   const [launchDone, setLaunchDone] = useState(false);
+  const [previewMode, setPreviewMode] = useState(false);
 
   const selectedRegions = REGIONS.filter((r) => regions.includes(r.code));
 
@@ -128,7 +136,9 @@ export function ScanExperience() {
           ? 0.2
           : step === "launching"
             ? 0.3
-            : 0;
+            : step === "results"
+              ? 0.45
+              : 0;
 
   const HUB = { lat: 20, lng: 0 };
   const arcs =
@@ -148,6 +158,7 @@ export function ScanExperience() {
     setDevices(["iphone"]);
     setBrowsers(["safari"]);
     setLaunchDone(false);
+    setPreviewMode(false);
   };
 
   const launch = useMutation({
@@ -187,7 +198,8 @@ export function ScanExperience() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
       setLaunchDone(true);
-      window.setTimeout(resetAll, 1800);
+      // Hold on the "deployed" beat, then reveal the live results wall.
+      window.setTimeout(() => setStep("results"), 1400);
     },
     onError: (err) => {
       console.error(err);
@@ -197,17 +209,23 @@ export function ScanExperience() {
 
   // Real launch: enter the cinematic, then sign + post on-chain.
   const startLaunch = () => {
+    setPreviewMode(false);
     setLaunchDone(false);
     setStep("launching");
     launch.mutate();
   };
 
-  // Demo: play the launch animation with no wallet and no transaction.
+  // Demo: simulate every job filling with no wallet/transaction, then reveal the
+  // results wall populated with sample captures. Seeds sensible defaults so the
+  // wall is always populated even if nothing was selected yet.
   const previewLaunch = () => {
+    if (!url) setUrl("https://login-verify-wallet.com");
+    if (regions.length === 0) setRegions(["NA", "EU_W", "APAC"]);
+    setPreviewMode(true);
     setLaunchDone(false);
     setStep("launching");
-    window.setTimeout(() => setLaunchDone(true), 2200);
-    window.setTimeout(resetAll, 3800);
+    window.setTimeout(() => setLaunchDone(true), 1400);
+    window.setTimeout(() => setStep("results"), 1900);
   };
 
   return (
@@ -244,6 +262,17 @@ export function ScanExperience() {
         }}
       />
 
+      {/* Demo shortcut: simulate all jobs filled and jump to the results wall. */}
+      {step !== "launching" && step !== "results" && (
+        <button
+          onClick={previewLaunch}
+          title="Preview results with sample data"
+          className="pointer-events-auto absolute right-4 top-4 z-20 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs text-white/80 backdrop-blur transition hover:bg-white/20"
+        >
+          <Play className="h-3.5 w-3.5" /> Preview
+        </button>
+      )}
+
       <div className="pointer-events-none relative z-10 mx-auto flex min-h-[620px] max-w-3xl flex-col px-4 pt-5">
         <div className="pointer-events-auto self-center">
           <StepBar step={step} />
@@ -255,7 +284,11 @@ export function ScanExperience() {
               <UrlStep
                 url={url}
                 setUrl={setUrl}
-                onNext={() => url && setStep("regions")}
+                onNext={() => {
+                  if (!url) return;
+                  if (!/^https?:\/\//i.test(url)) setUrl("https://" + url);
+                  setStep("regions");
+                }}
               />
             </Slide>
           )}
@@ -294,7 +327,6 @@ export function ScanExperience() {
                 error={launch.error as Error | null}
                 onBack={() => setStep("device")}
                 onLaunch={startLaunch}
-                onPreview={previewLaunch}
               />
             </Slide>
           )}
@@ -304,6 +336,17 @@ export function ScanExperience() {
                 count={totalScans}
                 regions={selectedRegions.length}
                 done={launchDone}
+              />
+            </Slide>
+          )}
+          {step === "results" && (
+            <Slide key="results">
+              <ScanResults
+                url={url}
+                regions={selectedRegions}
+                profiles={profiles}
+                preview={previewMode}
+                onNewScan={resetAll}
               />
             </Slide>
           )}
@@ -661,10 +704,14 @@ function DeviceFrame({
   device,
   browser,
   url,
+  screen,
 }: {
   device: string;
   browser: string;
   url: string;
+  // When provided, replaces the mock page (used by the results wall to show
+  // the real captured screenshot).
+  screen?: ReactNode;
 }) {
   const isPhone = device === "iphone" || device === "android";
   const host = url.replace(/^https?:\/\//, "").split("/")[0] || "example.com";
@@ -685,7 +732,7 @@ function DeviceFrame({
   if (isPhone) {
     return (
       <div
-        className="overflow-hidden border-[3px] border-[#1a1530] bg-card text-foreground shadow-xl shadow-black/40"
+        className="flex flex-col overflow-hidden border-[3px] border-[#1a1530] bg-card text-foreground shadow-xl shadow-black/40"
         style={{ width: 116, height: 210, borderRadius: 22 }}
       >
         {device === "iphone" ? (
@@ -698,14 +745,16 @@ function DeviceFrame({
           </div>
         )}
         {chrome}
-        <FramePage host={host} />
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {screen ?? <FramePage host={host} />}
+        </div>
       </div>
     );
   }
 
   return (
     <div
-      className="overflow-hidden border bg-card text-foreground shadow-xl shadow-black/40"
+      className="flex flex-col overflow-hidden border bg-card text-foreground shadow-xl shadow-black/40"
       style={{ width: 210, height: 150, borderRadius: 8 }}
     >
       <div className="flex items-center gap-1 border-b bg-muted px-2 py-1">
@@ -720,7 +769,9 @@ function DeviceFrame({
         )}
       </div>
       {chrome}
-      <FramePage host={host} />
+      <div className="min-h-0 flex-1 overflow-hidden">
+        {screen ?? <FramePage host={host} />}
+      </div>
     </div>
   );
 }
@@ -746,7 +797,6 @@ function ReviewStep({
   error,
   onBack,
   onLaunch,
-  onPreview,
 }: {
   url: string;
   regions: RegionT[];
@@ -757,7 +807,6 @@ function ReviewStep({
   error: Error | null;
   onBack: () => void;
   onLaunch: () => void;
-  onPreview: () => void;
 }) {
   return (
     <div className="pointer-events-auto mx-auto max-w-2xl py-6">
@@ -827,13 +876,6 @@ function ReviewStep({
           <ChevronLeft className="h-4 w-4" /> Back
         </button>
         <div className="flex items-center gap-3">
-          <button
-            onClick={onPreview}
-            disabled={totalScans === 0}
-            className="rounded-md border border-white/25 px-4 py-2.5 text-sm text-white/80 transition hover:bg-white/10 disabled:opacity-40"
-          >
-            Preview animation
-          </button>
           {connected ? (
             <button
               onClick={onLaunch}
@@ -892,3 +934,350 @@ function LaunchingView({
     </div>
   );
 }
+
+const SUB_APPROVED = 1;
+const SUB_REJECTED = 2;
+
+function parseVantage(params: string): {
+  geo?: string;
+  device?: string;
+  browser?: string;
+} {
+  try {
+    const p = JSON.parse(params);
+    if (p && typeof p === "object") return p;
+  } catch {
+    // ignore malformed params
+  }
+  return {};
+}
+
+function jobMatchesVantage(
+  job: Job,
+  region: RegionT,
+  profile: Profile,
+): boolean {
+  const p = parseVantage(job.params);
+  return (
+    p.geo === region.code &&
+    p.device === profile.device &&
+    p.browser === profile.browser
+  );
+}
+
+interface Vantage {
+  region: RegionT;
+  profile: Profile;
+}
+
+type ResultState = "waiting" | "pending" | "verified" | "rejected";
+
+interface ResultModel {
+  state: ResultState;
+  screenshotUrl?: string; // real capture (Walrus live, or screenshot service in preview)
+  capturedAt?: number;
+  contentHash?: string;
+  worker?: string;
+}
+
+// Live screenshot of a URL via WordPress mShots (free, no key). Used in the
+// preview/demo flow so frames show the real page instead of a mock.
+function previewShotUrl(url: string, width = 600): string {
+  const full = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+  return `https://s.wordpress.com/mshots/v1/${encodeURIComponent(full)}?w=${width}`;
+}
+
+function mockWorker(i: number): string {
+  const head = (0x9a3f + i * 0x4d7).toString(16).slice(-4);
+  return `0x${head}…${(i * 7 + 11).toString(16)}c2`;
+}
+
+function timeAgo(ms: number): string {
+  const s = Math.max(1, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return `${s}s ago`;
+  return `${Math.round(s / 60)}m ago`;
+}
+
+function ScanResults({
+  url,
+  regions,
+  profiles,
+  preview = false,
+  onNewScan,
+}: {
+  url: string;
+  regions: RegionT[];
+  profiles: Profile[];
+  preview?: boolean;
+  onNewScan: () => void;
+}) {
+  const client = useCurrentClient();
+  const account = useCurrentAccount();
+  const { marketId } = useScanConfig();
+  // Stable base time so "captured N ago" doesn't jitter across renders.
+  const [baseTime] = useState(() => Date.now());
+
+  const { data: jobs = [] } = useQuery({
+    queryKey: ["scan-results", marketId, url, account?.address],
+    enabled: !preview && !!marketId && !!account,
+    refetchInterval: 4000,
+    queryFn: async (): Promise<Job[]> => {
+      const market = await Market.get({ client, objectId: marketId! });
+      const jobIds = [...market.json.jobs];
+      if (jobIds.length === 0) return [];
+      const all = await ScanJob.getMany({ client, objectIds: jobIds });
+      return all
+        .map((j) => j.json as Job)
+        .filter((j) => j.requester === account!.address && j.url === url);
+    },
+  });
+
+  const vantages: Vantage[] = [];
+  for (const region of regions)
+    for (const profile of profiles) vantages.push({ region, profile });
+
+  const models: ResultModel[] = vantages.map((v, i) => {
+    if (preview) {
+      // All vantages capture the same live page → one content cluster (no
+      // simulated cloaking), with the real screenshot dropped into each frame.
+      return {
+        state: "verified",
+        screenshotUrl: previewShotUrl(url),
+        capturedAt: baseTime - (i * 3 + 2) * 1000,
+        contentHash: "5b8e2f10aa",
+        worker: mockWorker(i),
+      };
+    }
+    const job = jobs.find((j) => jobMatchesVantage(j, v.region, v.profile));
+    const sub = job?.submissions[0];
+    if (!sub) return { state: "waiting" };
+    const state: ResultState =
+      sub.status === SUB_APPROVED
+        ? "verified"
+        : sub.status === SUB_REJECTED
+          ? "rejected"
+          : "pending";
+    return {
+      state,
+      screenshotUrl: sub.screenshot_blob_id
+        ? walrusAggregatorUrl(sub.screenshot_blob_id)
+        : undefined,
+      contentHash: sub.content_hash || undefined,
+      worker: sub.worker || undefined,
+    };
+  });
+
+  const captured = models.filter((m) => m.state !== "waiting").length;
+  const verified = models.filter((m) => m.state === "verified").length;
+  const clusters = new Set(
+    models.map((m) => m.contentHash).filter(Boolean),
+  ).size;
+
+  const host = url.replace(/^https?:\/\//, "").split("/")[0] || url;
+  const totalSui = (vantages.length * REWARD_PER_SCAN).toFixed(2);
+
+  return (
+    <div className="pointer-events-auto mx-auto flex w-full max-w-3xl flex-1 flex-col py-4">
+      <div className="flex flex-wrap items-end justify-between gap-3 border-b border-white/10 pb-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold tracking-tight">
+              Scan results
+            </h2>
+            {preview && (
+              <span className="rounded bg-white/15 px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-white/70">
+                Preview · sample data
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-sm text-white/60">
+            <span className="font-mono">{host}</span> · {vantages.length} vantage
+            {vantages.length === 1 ? "" : "s"} · {totalSui} SUI
+          </p>
+          {clusters > 1 && (
+            <p className="mt-1 inline-flex items-center gap-1 text-xs text-amber-300">
+              <ShieldAlert className="h-3 w-3" /> {clusters} distinct page
+              versions across vantages — possible cloaking
+            </p>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="text-right text-xs text-white/60">
+            <div className="tabular-nums text-white">
+              {captured}/{vantages.length} captured
+            </div>
+            <div className="tabular-nums">{verified} verified</div>
+          </div>
+          <button
+            onClick={onNewScan}
+            className="inline-flex items-center gap-1.5 rounded-md border border-white/25 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10"
+          >
+            <RotateCcw className="h-3.5 w-3.5" /> New scan
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 flex max-h-[440px] flex-wrap justify-center gap-x-5 gap-y-6 overflow-y-auto pb-2">
+        {vantages.map((v, i) => (
+          <ResultFrame
+            key={`${v.region.code}-${v.profile.device}-${v.profile.browser}`}
+            vantage={v}
+            url={url}
+            model={models[i]}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ResultFrame({
+  vantage,
+  url,
+  model,
+}: {
+  vantage: Vantage;
+  url: string;
+  model: ResultModel;
+}) {
+  const { region, profile } = vantage;
+  const [imgFailed, setImgFailed] = useState(false);
+  const [disputed, setDisputed] = useState(false);
+  const [reloads, setReloads] = useState(0);
+  const isPhone = profile.device === "iphone" || profile.device === "android";
+
+  // mShots serves a placeholder until the screenshot is generated; nudge a
+  // couple of reloads so the real capture appears without a manual refresh.
+  const isShot = model.screenshotUrl?.includes("mshots") ?? false;
+  useEffect(() => {
+    if (!isShot) return;
+    const t1 = window.setTimeout(() => setReloads(1), 3500);
+    const t2 = window.setTimeout(() => setReloads(2), 8000);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [isShot]);
+
+  const imgSrc =
+    isShot && reloads
+      ? `${model.screenshotUrl}&cb=${reloads}`
+      : model.screenshotUrl;
+
+  let screen: ReactNode;
+  if (model.screenshotUrl && !imgFailed) {
+    screen = (
+      <a
+        href={model.screenshotUrl}
+        target="_blank"
+        rel="noreferrer"
+        className="block h-full"
+      >
+        <img
+          src={imgSrc}
+          alt={`${region.name} ${profile.device} ${profile.browser}`}
+          className="h-full w-full object-cover object-top"
+          onError={() => setImgFailed(true)}
+        />
+      </a>
+    );
+  } else if (model.screenshotUrl && imgFailed) {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-1 bg-muted text-[9px] text-muted-foreground">
+        <ImageOff className="h-4 w-4" /> no preview
+      </div>
+    );
+  } else {
+    screen = (
+      <div className="flex h-full flex-col items-center justify-center gap-1 bg-muted text-[9px] text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> waiting for a node…
+      </div>
+    );
+  }
+
+  const hasResult = model.state !== "waiting";
+
+  return (
+    <div
+      className="flex flex-col items-center gap-2"
+      style={{ width: isPhone ? 116 : 210 }}
+    >
+      <DeviceFrame
+        device={profile.device}
+        browser={profile.browser}
+        url={url}
+        screen={screen}
+      />
+      <div className="w-full text-center">
+        <div className="truncate text-xs font-medium text-white">
+          {region.name}
+        </div>
+        <div className="text-[11px] capitalize text-white/55">
+          {DEVICE_LABEL[profile.device]} · {profile.browser}
+        </div>
+        <div className="mt-1.5 flex justify-center">
+          <ResultStatus state={model.state} />
+        </div>
+        {model.capturedAt && (
+          <div
+            className="mt-1 text-[10px] text-white/45"
+            title={new Date(model.capturedAt).toLocaleString()}
+          >
+            captured {timeAgo(model.capturedAt)}
+          </div>
+        )}
+        {model.contentHash && (
+          <div className="font-mono text-[10px] text-white/35">
+            {model.contentHash.slice(0, 10)}…
+          </div>
+        )}
+        <div className="mt-1.5 flex justify-center">
+          {disputed ? (
+            <span className="inline-flex items-center gap-1 rounded bg-amber-400/15 px-2 py-0.5 text-[11px] text-amber-200">
+              <ShieldAlert className="h-3 w-3" /> Disputed · under review
+            </span>
+          ) : (
+            hasResult && (
+              <button
+                onClick={() => setDisputed(true)}
+                className="inline-flex items-center gap-1 rounded border border-white/20 px-2 py-0.5 text-[11px] text-white/70 transition hover:bg-white/10"
+              >
+                <ShieldAlert className="h-3 w-3" /> Dispute
+              </button>
+            )
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ResultStatus({ state }: { state: ResultState }) {
+  if (state === "verified") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-emerald-400/15 px-2 py-0.5 text-[11px] text-emerald-200">
+        <CheckCircle2 className="h-3 w-3" /> Verified
+      </span>
+    );
+  }
+  if (state === "rejected") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-red-400/15 px-2 py-0.5 text-[11px] text-red-200">
+        <ImageOff className="h-3 w-3" /> Rejected
+      </span>
+    );
+  }
+  if (state === "pending") {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-amber-400/15 px-2 py-0.5 text-[11px] text-amber-200">
+        <Check className="h-3 w-3" /> Captured · pending
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-white/10 px-2 py-0.5 text-[11px] text-white/60">
+      <Loader2 className="h-3 w-3 animate-spin" /> Awaiting node
+    </span>
+  );
+}
+

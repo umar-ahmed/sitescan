@@ -14,6 +14,10 @@ export default {
       return handleCloak(request);
     }
 
+    if (url.pathname === "/protected") {
+      return handleProtected();
+    }
+
     if (url.pathname === "/favicon.svg") {
       return handleFavicon();
     }
@@ -126,6 +130,10 @@ function handleIndex(): Response {
       <a href="/cloak">/cloak</a>
       <div class="desc">Cat emoji for desktop, devil imp on mobile</div>
     </li>
+    <li>
+      <a href="/protected">/protected</a>
+      <div class="desc">Cloudflare bot verification challenge</div>
+    </li>
   </ul>
 </body>
 </html>`;
@@ -164,6 +172,10 @@ function handleCloak(request: Request): Response {
   }
 
   return renderPage("\u{1F431}", "Meow");
+}
+
+function handleProtected(): Response {
+  return renderPage("\u{1F916}", "Bot Check");
 }
 
 interface CountryInfo {

@@ -30,7 +30,7 @@ function App() {
 
       <main className="container mx-auto px-4 py-8">
         <div className="mx-auto max-w-3xl space-y-4">
-          <div className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-xs text-violet-900">
+          <div className="rounded-lg border border-violet-400/30 bg-violet-500/10 px-4 py-3 text-xs text-violet-200">
             <div className="flex items-center gap-1.5 font-medium">
               <Lock className="h-4 w-4" /> TLSNotary validation layer
             </div>
@@ -42,7 +42,7 @@ function App() {
               evidence. The verifier independently re-checks each proof (notary
               signature → proven host → HTTP status → HTML hash) and{" "}
               <span className="font-medium">payout is gated on it</span>. Run{" "}
-              <code className="text-violet-950">pnpm verify</code> in another
+              <code className="text-violet-100">pnpm verify</code> in another
               window to release payouts.
             </p>
           </div>

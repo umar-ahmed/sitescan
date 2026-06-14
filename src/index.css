@@ -1,26 +1,27 @@
 @import "tailwindcss";
 
 @theme {
-  /* Light, utilitarian theme with ChainPatrol purple as the accent.
-     Page sits on a cool gray so white panels read as distinct surfaces. */
-  --color-background: #e8eaf0;
-  --color-foreground: #17181c;
-  --color-card: #ffffff;
+  /* Dark theme matching the cinematic scan experience (#0a0820 base) with
+     ChainPatrol purple as the accent. Panels sit a step above the page so they
+     read as distinct surfaces without the harsh white-on-dark contrast. */
+  --color-background: #0a0820;
+  --color-foreground: #e9e8f2;
+  --color-card: #14112e;
   --color-nav: #241753;
-  --color-card-foreground: #17181c;
-  --color-primary: #5b3fa3;
+  --color-card-foreground: #e9e8f2;
+  --color-primary: #7c5cff;
   --color-primary-foreground: #ffffff;
-  --color-secondary: #eef0f3;
-  --color-secondary-foreground: #2a2150;
-  --color-muted: #f0f1f4;
-  --color-muted-foreground: #5f6471;
-  --color-accent: #ece7f9;
-  --color-accent-foreground: #391881;
-  --color-destructive: #dc2626;
+  --color-secondary: #1d1942;
+  --color-secondary-foreground: #d8d4f0;
+  --color-muted: #1b1740;
+  --color-muted-foreground: #9c97bd;
+  --color-accent: #241c4f;
+  --color-accent-foreground: #d8caff;
+  --color-destructive: #ef4444;
   --color-destructive-foreground: #ffffff;
-  --color-border: #e4e6ec;
-  --color-input: #d6d9e1;
-  --color-ring: #7059a6;
+  --color-border: #2a2452;
+  --color-input: #2a2452;
+  --color-ring: #8b71d6;
   --color-sui: oklch(0.7 0.2 220);
 
   --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
