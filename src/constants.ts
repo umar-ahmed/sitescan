@@ -1,7 +1,7 @@
 // Deployed scan_market package IDs per network. Update after `sui client publish`.
 export const DEVNET_SCAN_MARKET_PACKAGE_ID: string | undefined = undefined;
 export const TESTNET_SCAN_MARKET_PACKAGE_ID: string | undefined =
-  "0x62cae1ab34e330e3c81d585cfc1ade9290c673520ed253a47d12ee1bf3ad97f2";
+  "0x3b93a7619e0e669afc51ab8a32f52183209c233ceae6b5ce9a5694cf595c9b4a";
 export const MAINNET_SCAN_MARKET_PACKAGE_ID: string | undefined = undefined;
 
 // Shared Market registry object, created in the module `init` on publish.

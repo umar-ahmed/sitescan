@@ -166,6 +166,9 @@ async function jobIsClaimable(
   const status = Number(job.json.status);
   const max = Number(job.json.max_submissions);
   if (status !== 0 || job.json.submissions.length >= max) return null;
+  // One scan per node per job: never submit twice to the same job, even across
+  // restarts (the in-memory `handled` set doesn't survive a process restart).
+  if (job.json.submissions.some((s) => s.worker === address)) return null;
   return { url: job.json.url, params: job.json.params };
 }
 
@@ -264,67 +267,79 @@ async function main() {
     console.log(`TLSNotary proving ON · notary=${TLSN_NOTARY_URL}`);
   }
 
-  const tick = async () => {
-    try {
-      const jobs = await getJobIds();
-      for (const jobId of jobs) {
-        if (handled.has(jobId)) continue;
-        const claim = await jobIsClaimable(jobId);
-        if (!claim) {
-          handled.add(jobId);
-          continue;
-        }
-        const skip = vantageMismatch(claim.params);
-        if (skip) {
-          console.log(`· skip ${jobId} — wants ${skip}`);
-          handled.add(jobId);
-          continue;
-        }
+  // Claim and fully process exactly one matching job (capture → prove → submit),
+  // then return. Cheap skips (already handled, wrong vantage, policy-denied) move
+  // on to the next candidate; a real scan attempt ends the pass.
+  const scanOne = async (): Promise<void> => {
+    const jobs = await getJobIds();
+    for (const jobId of jobs) {
+      if (handled.has(jobId)) continue;
+      const claim = await jobIsClaimable(jobId);
+      if (!claim) {
         handled.add(jobId);
-        const policy = checkPolicy(claim.url);
-        if (!policy.allowed) {
-          console.log(
-            `  skipping policy-denied URL: ${claim.url} (${policy.reason})`,
-          );
-          continue;
-        }
-        console.log(
-          `\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`,
-        );
-        const { screenshot, html } = await capture(browser, claim.url);
-
-        let proofBlob = "";
-        if (TLSN_ENABLED) {
-          proofBlob = await proveAndUpload(claim.url);
-          if (!proofBlob) {
-            console.warn(
-              `  ✗ no TLSNotary proof for ${claim.url} — not submitting (TLSNotary required, no fallback)`,
-            );
-            continue;
-          }
-        }
-
-        const ssBlob = await uploadToWalrus(screenshot, {
-          publisher: WALRUS_PUBLISHER,
-          contentType: "image/png",
-        });
-        const htmlBlob = await uploadToWalrus(html, {
-          publisher: WALRUS_PUBLISHER,
-          contentType: "text/html",
-        });
-        console.log(
-          `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
-        );
-        const digest = await submit(jobId, ssBlob, htmlBlob, proofBlob);
-        console.log(`  submitted (pending verification) · digest=${digest}`);
+        continue;
       }
-    } catch (err) {
-      console.error("tick error:", (err as Error).message);
+      const skip = vantageMismatch(claim.params);
+      if (skip) {
+        console.log(`· skip ${jobId} — wants ${skip}`);
+        handled.add(jobId);
+        continue;
+      }
+      const policy = checkPolicy(claim.url);
+      if (!policy.allowed) {
+        console.log(
+          `  skipping policy-denied URL: ${claim.url} (${policy.reason})`,
+        );
+        handled.add(jobId);
+        continue;
+      }
+      handled.add(jobId);
+      console.log(
+        `\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`,
+      );
+      const { screenshot, html } = await capture(browser, claim.url);
+
+      let proofBlob = "";
+      if (TLSN_ENABLED) {
+        proofBlob = await proveAndUpload(claim.url);
+        if (!proofBlob) {
+          console.warn(
+            `  ✗ no TLSNotary proof for ${claim.url} — not submitting (TLSNotary required, no fallback)`,
+          );
+          return;
+        }
+      }
+
+      const ssBlob = await uploadToWalrus(screenshot, {
+        publisher: WALRUS_PUBLISHER,
+        contentType: "image/png",
+      });
+      const htmlBlob = await uploadToWalrus(html, {
+        publisher: WALRUS_PUBLISHER,
+        contentType: "text/html",
+      });
+      console.log(
+        `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
+      );
+      const digest = await submit(jobId, ssBlob, htmlBlob, proofBlob);
+      console.log(`  submitted (pending verification) · digest=${digest}`);
+      return;
     }
   };
 
-  await tick();
-  setInterval(tick, POLL_MS);
+  // Self-scheduling loop instead of setInterval: a new pass only starts after the
+  // previous one finishes, so the node never runs two scans (or two proofs) at
+  // once and never double-submits the same job.
+  const loop = async () => {
+    try {
+      await scanOne();
+    } catch (err) {
+      console.error("scan error:", (err as Error).message);
+    } finally {
+      setTimeout(loop, POLL_MS);
+    }
+  };
+  await loop();
 }
 
 main().catch((err) => {

@@ -38,6 +38,7 @@ module scan_market::scan_market {
     const EBadIndex: u64 = 5;
     const ENotPending: u64 = 6;
     const EJobNotSettled: u64 = 7;
+    const EAlreadySubmitted: u64 = 8;
 
     /// Shared registry of every job posted to the market.
     public struct Market has key {
@@ -171,10 +172,22 @@ module scan_market::scan_market {
         transfer::share_object(job);
     }
 
+    /// True if `worker` already has a submission recorded for this job.
+    fun worker_has_submitted(job: &ScanJob, worker: address): bool {
+        let mut i = 0;
+        let n = job.submissions.length();
+        while (i < n) {
+            if (job.submissions.borrow(i).worker == worker) return true;
+            i = i + 1;
+        };
+        false
+    }
+
     /// Record a completed scan (Walrus blob ids) as PENDING. Pays nothing until
     /// the verifier approves it. New scans are accepted while the number of
     /// approved + pending scans is below `max_submissions`, so a rejected scan
-    /// reopens a slot for a re-scan.
+    /// reopens a slot for a re-scan. Each worker may submit at most one scan per
+    /// job, so `max_submissions` always reflects independent scanners.
     public fun submit_scan(
         job: &mut ScanJob,
         screenshot_blob_id: String,
@@ -186,6 +199,7 @@ module scan_market::scan_market {
         assert!(job.approved_count + job.pending_count < job.max_submissions, EJobFull);
 
         let worker = ctx.sender();
+        assert!(!worker_has_submitted(job, worker), EAlreadySubmitted);
         let index = job.submissions.length();
         job.submissions.push_back(Submission {
             worker,
