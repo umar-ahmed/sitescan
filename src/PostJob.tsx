@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Transaction } from "@mysten/sui/transactions";
 import { postJob } from "./contracts/scan_market/scan_market";
 import { useScanConfig, suiToMist } from "./lib/config";
+import { isEnsName, ensToUrl } from "./lib/ens";
 import { Button } from "./components/ui/button";
 import { Search, Plus, X, ChevronDown } from "lucide-react";
 
@@ -125,6 +126,7 @@ export function PostJob() {
   const removeVantage = (key: string) =>
     setVantages((vs) => vs.filter((v) => vKey(v) !== key));
 
+  // Resolve ENS name when input changes
   const mutation = useMutation({
     mutationFn: async () => {
       if (!packageId || !marketId) {
@@ -185,13 +187,18 @@ export function PostJob() {
             className="h-12 w-full bg-transparent text-base outline-none placeholder:text-muted-foreground"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://…"
+            placeholder="https://… or name.eth"
             onKeyDown={(e) => {
               if (e.key === "Enter" && canScan && !mutation.isPending) {
                 mutation.mutate();
               }
             }}
           />
+          {isEnsName(url) && (
+            <p className="text-xs text-muted-foreground">
+              Will scan: {ensToUrl(url)}
+            </p>
+          )}
         </div>
         <Button
           size="lg"

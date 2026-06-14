@@ -18,6 +18,8 @@ import {
 import { uploadToWalrus } from "../src/lib/walrus";
 import { checkPolicy } from "../src/lib/vetting";
 import { TlsnHarness, DEFAULT_NOTARY_URL } from "./tlsn/harness";
+import { fetchEnsMetadata } from "./ens-metadata";
+import { isEnsName, ensToUrl } from "../src/lib/ens";
 import {
   TESTNET_SCAN_MARKET_PACKAGE_ID,
   TESTNET_MARKET_ID,
@@ -317,26 +319,26 @@ async function main() {
         handled.add(jobId);
         continue;
       }
-      const policy = checkPolicy(claim.url);
+      // ENS names resolve to a contenthash gateway URL we actually render/prove.
+      const scanUrl = isEnsName(claim.url) ? ensToUrl(claim.url) : claim.url;
+      const policy = checkPolicy(scanUrl);
       if (!policy.allowed) {
         console.log(
-          `  skipping policy-denied URL: ${claim.url} (${policy.reason})`,
+          `  skipping policy-denied URL: ${scanUrl} (${policy.reason})`,
         );
         handled.add(jobId);
         continue;
       }
       handled.add(jobId);
-      console.log(
-        `\n→ scanning ${claim.url} [${claim.params}] for job ${jobId}`,
-      );
-      const { screenshot, html } = await capture(browser, claim.url);
+      console.log(`\n→ scanning ${scanUrl} [${claim.params}] for job ${jobId}`);
+      const { screenshot, html } = await capture(browser, scanUrl);
 
       let proofBlob = "";
       if (TLSN_ENABLED) {
-        proofBlob = await proveAndUpload(claim.url);
+        proofBlob = await proveAndUpload(scanUrl);
         if (!proofBlob) {
           console.warn(
-            `  ✗ no TLSNotary proof for ${claim.url} — not submitting (TLSNotary required, no fallback)`,
+            `  ✗ no TLSNotary proof for ${scanUrl} — not submitting (TLSNotary required, no fallback)`,
           );
           return;
         }
@@ -353,6 +355,16 @@ async function main() {
       console.log(
         `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
       );
+
+      // If the job target is an ENS name, attach its resolved metadata too.
+      const ensMetadata = await fetchEnsMetadata(claim.url).catch(() => null);
+      if (ensMetadata) {
+        const ensMetaBlob = await uploadToWalrus(
+          JSON.stringify(ensMetadata, null, 2),
+          { publisher: WALRUS_PUBLISHER, contentType: "application/json" },
+        );
+        console.log(`  ENS metadata uploaded: ${ensMetaBlob}`);
+      }
       const digest = await submit(jobId, ssBlob, htmlBlob, proofBlob);
       console.log(`  submitted (pending verification) · digest=${digest}`);
       return;
