@@ -133,7 +133,18 @@ export class TlsnHarness {
     this.browser = await chromium.launch({ headless: true });
   }
 
+  // Relaunch the headless browser if it died (e.g. an OOM kill during a heavy
+  // proof). Without this, one crash would make every subsequent prove/verify
+  // throw "browser has been closed" — which the verifier would otherwise
+  // misread as an invalid proof.
+  private async ensureBrowser() {
+    if (!this.browser || !this.browser.isConnected()) {
+      this.browser = await chromium.launch({ headless: true });
+    }
+  }
+
   private async newPage() {
+    await this.ensureBrowser();
     const context = await this.browser!.newContext();
     const page = await context.newPage();
     if (this.debug) {

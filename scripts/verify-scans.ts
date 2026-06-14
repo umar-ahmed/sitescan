@@ -70,6 +70,11 @@ interface ProofVerdict {
   approve: boolean;
   reason: string;
   contentHash: string;
+  // True when verification couldn't complete due to verifier-side infra (Walrus
+  // fetch, harness crash) rather than a bad proof. Transient verdicts must NOT
+  // be resolved on-chain — the submission stays pending and is retried, so a
+  // verifier hiccup never holds a worker's funds or burns their one attempt.
+  transient: boolean;
 }
 
 // Download the presentation from Walrus and re-run the deterministic provenance
@@ -83,8 +88,10 @@ async function verifyProof(
       approve: false,
       reason: "Verifier has no notary configured",
       contentHash: "",
+      transient: true,
     };
   }
+  let presentationJSON: PresentationJSON;
   try {
     const res = await fetch(
       walrusAggregatorUrl(proofBlobId, WALRUS_AGGREGATOR),
@@ -93,7 +100,16 @@ async function verifyProof(
       },
     );
     if (!res.ok) throw new Error(`Walrus fetch ${res.status}`);
-    const presentationJSON = (await res.json()) as PresentationJSON;
+    presentationJSON = (await res.json()) as PresentationJSON;
+  } catch (err) {
+    return {
+      approve: false,
+      reason: `Could not fetch proof from Walrus: ${(err as Error).message}`,
+      contentHash: "",
+      transient: true,
+    };
+  }
+  try {
     const verified = await tlsnHarness.verify(presentationJSON);
     const provenance = await checkProvenance(verified, {
       expectedHost: new URL(jobUrl).hostname,
@@ -103,12 +119,14 @@ async function verifyProof(
       approve: provenance.status === "PROVEN",
       reason: provenance.reason,
       contentHash: provenance.htmlContentHash ?? "",
+      transient: false,
     };
   } catch (err) {
     return {
       approve: false,
-      reason: `TLSNotary verification failed: ${(err as Error).message}`,
+      reason: `Verifier could not run the proof check: ${(err as Error).message}`,
       contentHash: "",
+      transient: true,
     };
   }
 }
@@ -187,6 +205,7 @@ async function resolveOnChain(
             approve: false,
             reason: "No TLSNotary proof attached (proof required, no fallback)",
             contentHash: "",
+            transient: false,
           };
         }
         const proof = await verifyProof(job.url, s.notary_proof_blob_id);
@@ -195,6 +214,7 @@ async function resolveOnChain(
           approve: proof.approve,
           reason: proof.reason,
           contentHash: proof.contentHash,
+          transient: proof.transient,
         };
       }
       const sv = verdict.submissions[s.index];
@@ -206,25 +226,37 @@ async function resolveOnChain(
           sv?.reason ??
           (approve ? "Evidence verified via Walrus re-fetch" : "Rejected"),
         contentHash: sv?.htmlContentHash ?? "",
+        transient: false,
       };
     }),
   );
   if (decisions.length === 0) return;
+
+  // Transient verdicts (Walrus/harness failures) are left pending and retried
+  // next poll, so a verifier-side hiccup never wrongly rejects a valid proof.
+  const transient = decisions.filter((d) => d.transient);
+  const actionable = decisions.filter((d) => !d.transient);
+  for (const d of transient) {
+    console.log(
+      `[verify] job=${job.id.slice(0, 10)}… url=${job.url}\n         RETRY scan #${d.index} — ${d.reason}`,
+    );
+  }
+  if (actionable.length === 0) return;
 
   if (TLSN_ENABLED) {
     const cloak = verdict.cloakingDelta
       ? ` · cloaking=${verdict.cloakingDelta.clusters} cluster(s)`
       : "";
     console.log(`[verify] job=${job.id.slice(0, 10)}… url=${job.url}${cloak}`);
-    for (const d of decisions) {
+    for (const d of actionable) {
       console.log(
-        `         ${d.approve ? "PROVEN" : "NO PROOF"} scan #${d.index} — ${d.reason}`,
+        `         ${d.approve ? "PROVEN" : "REJECTED"} scan #${d.index} — ${d.reason}`,
       );
     }
   }
 
   const tx = new Transaction();
-  for (const d of decisions) {
+  for (const d of actionable) {
     tx.add(
       resolveScan({
         package: PKG,
@@ -259,7 +291,7 @@ async function resolveOnChain(
     return;
   }
   await client.waitForTransaction({ result: res });
-  for (const d of decisions) {
+  for (const d of actionable) {
     console.log(
       `             ↳ on-chain ${d.approve ? "APPROVED (paid)" : "REJECTED (held)"} scan #${d.index}`,
     );

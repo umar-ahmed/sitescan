@@ -227,13 +227,17 @@ let tlsnHarness: TlsnHarness | null = null;
 // cipher). When TLSN is enabled the caller treats "" as a hard skip — there is
 // no non-proof submission path.
 const PROOF_TIMEOUT_MS = Number(process.env.TLSN_PROOF_TIMEOUT_MS ?? 90000);
+// Max response bytes the prover buffers for the MPC transcript. Must exceed the
+// target's full HTTP response (e.g. example.com ~0.5KB, but many real pages are
+// 50KB+). Larger values cost more MPC time + memory, so it's tunable.
+const TLSN_MAX_RECV = Number(process.env.TLSN_MAX_RECV ?? 131072);
 
 async function proveAndUpload(url: string): Promise<string> {
   if (!tlsnHarness) return "";
   try {
     const { presentationJSON } = await tlsnHarness.prove(
       url,
-      16384,
+      TLSN_MAX_RECV,
       PROOF_TIMEOUT_MS,
     );
     const proofBlob = await uploadToWalrus(JSON.stringify(presentationJSON), {

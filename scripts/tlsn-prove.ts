@@ -11,6 +11,7 @@ const OUT =
   join(HERE, "tlsn", "out", `${new URL(TARGET).hostname}.presentation.json`);
 const NOTARY_URL =
   process.env.TLSN_NOTARY_URL ?? process.env.NOTARY_URL ?? DEFAULT_NOTARY_URL;
+const MAX_RECV = Number(process.env.TLSN_MAX_RECV ?? 131072);
 
 async function main() {
   console.log(`TLSNotary prove → ${TARGET}`);
@@ -20,7 +21,7 @@ async function main() {
   await harness.start();
   try {
     console.log("running real MPC-TLS proof in headless Chromium…");
-    const result = await harness.prove(TARGET);
+    const result = await harness.prove(TARGET, MAX_RECV);
 
     await mkdir(dirname(OUT), { recursive: true });
     await writeFile(OUT, JSON.stringify(result.presentationJSON, null, 2));
