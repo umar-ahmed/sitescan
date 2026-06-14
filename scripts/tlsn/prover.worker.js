@@ -41,23 +41,36 @@ async function verify(presentationJSON) {
 }
 
 // Produce a real presentation over MPC-TLS, then verify it for convenience.
-async function prove({ target, notaryUrl, proxyUrl, maxRecv }) {
+async function prove({
+  target,
+  notaryUrl,
+  proxyUrl,
+  maxRecv,
+  cookies,
+  userAgent,
+}) {
   await ensureInit();
   const host = new URL(target).hostname;
   const notary = NotaryServer.from(notaryUrl);
   const notaryKeyPem = await notary.publicKey("pem");
+
+  // When a human cleared a bot-wall, reuse the exact User-Agent + clearance
+  // cookies they obtained so the notarized request is authenticated and the
+  // server returns the real page (HTTP 200) instead of the challenge (403).
+  const headers = {
+    Host: host,
+    Connection: "close",
+    "User-Agent": userAgent || "proof-of-scan-tlsn/0.1",
+    Accept: "*/*",
+  };
+  if (cookies) headers.Cookie = cookies;
 
   const presentationJSON = await Prover.notarize({
     url: target,
     notaryUrl,
     websocketProxyUrl: proxyUrl,
     method: "GET",
-    headers: {
-      Host: host,
-      Connection: "close",
-      "User-Agent": "proof-of-scan-tlsn/0.1",
-      Accept: "*/*",
-    },
+    headers,
     maxRecvData: maxRecv || 16384,
   });
 

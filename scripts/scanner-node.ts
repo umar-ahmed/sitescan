@@ -1,9 +1,14 @@
+import { createInterface } from "node:readline/promises";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   chromium,
   firefox,
   webkit,
   devices,
   type Browser,
+  type BrowserContext,
   type BrowserType,
 } from "playwright";
 import { SuiGrpcClient } from "@mysten/sui/grpc";
@@ -17,6 +22,7 @@ import {
 } from "../src/contracts/scan_market/scan_market";
 import { uploadToWalrus } from "../src/lib/walrus";
 import { checkPolicy } from "../src/lib/vetting";
+import { detectCaptcha } from "../src/lib/captcha";
 import { TlsnHarness, DEFAULT_NOTARY_URL } from "./tlsn/harness";
 import { fetchEnsMetadata } from "./ens-metadata";
 import { isEnsName, ensToUrl } from "../src/lib/ens";
@@ -95,6 +101,16 @@ const CAP_ENGINE: Engine = ENGINE_OF[CAP.browser] ?? "chromium";
 const IGNORE_GEO = /^(1|true|yes|on)$/i.test(
   process.env.SCANNER_IGNORE_GEO ?? "",
 );
+
+// Human-in-the-loop CAPTCHA solving: when a scan hits a bot-wall / CAPTCHA, the
+// node opens a real (headed) browser so a person can solve the challenge, then
+// re-captures the unblocked page. Requires an interactive terminal; auto-off
+// when stdin isn't a TTY (e.g. CI) or SCANNER_HITL is explicitly disabled.
+const HITL_ENABLED =
+  !!process.stdin.isTTY &&
+  !/^(0|false|no|off)$/i.test(process.env.SCANNER_HITL ?? "1");
+// How long the human has to solve the challenge before the node gives up.
+const HITL_TIMEOUT_MS = Number(process.env.SCANNER_HITL_TIMEOUT_MS ?? 180000);
 
 // Build the browser-context options once: emulate the chosen device accurately,
 // dropping the mobile-only fields that Firefox's engine doesn't support.
@@ -215,20 +231,123 @@ async function capture(
   const page = await context.newPage();
   let html: string;
   try {
-    await page.goto(url, { waitUntil: "networkidle", timeout: 20000 });
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+    // Best-effort settle for dynamic pages, but never fail on it: bot-walls
+    // (Cloudflare, etc.) keep polling their challenge platform so the network
+    // never goes idle — we still want their interstitial HTML for detection.
+    await page
+      .waitForLoadState("networkidle", { timeout: 8000 })
+      .catch(() => {});
     html = await page.content();
   } catch (err) {
-    await page.setContent(
-      `<html><body style="font-family:sans-serif;padding:40px">
+    // Even on a hard navigation failure, a challenge page may have rendered;
+    // grab whatever is there before falling back to the synthetic notice.
+    html = await page.content().catch(() => "");
+    if (html.length < 200) {
+      await page.setContent(
+        `<html><body style="font-family:sans-serif;padding:40px">
        <h2>Scan of ${url}</h2>
        <p>Navigation failed: ${(err as Error).message}</p>
        <p>profile: ${CAP.device} / ${CAP.browser} (${CAP_ENGINE})</p></body></html>`,
-    );
-    html = await page.content();
+      );
+      html = await page.content();
+    }
   }
   const screenshot = await page.screenshot({ type: "png", fullPage: false });
   await context.close();
   return { screenshot, html };
+}
+
+// Open a real, visible browser so a human can solve the challenge, then capture
+// the unblocked page. Resolves with the post-solve evidence, or null if the
+// person didn't confirm in time (in which case the caller skips the job).
+interface SolvedCaptcha {
+  screenshot: Buffer;
+  html: string;
+  // The exact credentials the human earned clearing the bot-wall, so the
+  // TLSNotary prover can replay an authenticated request (cf_clearance etc. are
+  // bound to the User-Agent that solved them).
+  cookies: string;
+  userAgent: string;
+}
+
+async function humanSolveCaptcha(
+  url: string,
+  provider: string,
+): Promise<SolvedCaptcha | null> {
+  console.log(`\n  🧩 ${provider} CAPTCHA detected on ${url}`);
+  console.log(
+    "  Opening a real Chrome window — solve the challenge, then press Enter here.",
+  );
+  // Bot-walls (Cloudflare/Turnstile) reject automation-fingerprinted browsers,
+  // so the human's clicks just reload. Launch a persistent, low-fingerprint
+  // session: real installed Chrome when available, with --enable-automation and
+  // the AutomationControlled blink feature stripped, and navigator.webdriver
+  // hidden. A persistent profile lets the challenge clearance cookie/PAT stick.
+  const userDataDir = await mkdtemp(join(tmpdir(), "pos-hitl-"));
+  const launchOpts = {
+    headless: false,
+    ignoreDefaultArgs: ["--enable-automation"],
+    args: ["--disable-blink-features=AutomationControlled"],
+    ...contextOptions,
+  };
+  let context: BrowserContext;
+  try {
+    context = await chromium.launchPersistentContext(userDataDir, {
+      channel: "chrome",
+      ...launchOpts,
+    });
+  } catch {
+    context = await chromium.launchPersistentContext(userDataDir, launchOpts);
+  }
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+  });
+  const page = context.pages()[0] ?? (await context.newPage());
+  try {
+    await page
+      .goto(url, { waitUntil: "domcontentloaded", timeout: 30000 })
+      .catch(() => undefined);
+
+    const rl = createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    const timeout = new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), HITL_TIMEOUT_MS),
+    );
+    const answered = rl
+      .question("  ✅ Press Enter once the page is past the challenge…\n")
+      .then(() => "done" as const);
+    const outcome = await Promise.race([answered, timeout]);
+    rl.close();
+    if (outcome === "timeout") {
+      console.warn(
+        `  ⏱️  No confirmation within ${Math.round(HITL_TIMEOUT_MS / 1000)}s — skipping job.`,
+      );
+      return null;
+    }
+
+    // Re-check: if the page is still showing the challenge, treat as unsolved.
+    const html = await page.content();
+    if (detectCaptcha(html)) {
+      console.warn("  ✗ Page still shows a CAPTCHA — skipping job.");
+      return null;
+    }
+    const screenshot = await page.screenshot({ type: "png", fullPage: false });
+    const jar = await context.cookies(url);
+    const cookies = jar.map((c) => `${c.name}=${c.value}`).join("; ");
+    const userAgent = await page.evaluate(() => navigator.userAgent);
+    console.log(
+      `  ✓ Challenge cleared — captured the unblocked page (${jar.length} cookie(s) to reuse for the proof).`,
+    );
+    return { screenshot, html, cookies, userAgent };
+  } finally {
+    await context.close().catch(() => undefined);
+    await rm(userDataDir, { recursive: true, force: true }).catch(
+      () => undefined,
+    );
+  }
 }
 
 let tlsnHarness: TlsnHarness | null = null;
@@ -243,19 +362,25 @@ const PROOF_TIMEOUT_MS = Number(process.env.TLSN_PROOF_TIMEOUT_MS ?? 90000);
 // 50KB+). Larger values cost more MPC time + memory, so it's tunable.
 const TLSN_MAX_RECV = Number(process.env.TLSN_MAX_RECV ?? 131072);
 
-async function proveAndUpload(url: string): Promise<string> {
+async function proveAndUpload(
+  url: string,
+  creds: { cookies?: string; userAgent?: string } = {},
+): Promise<string> {
   if (!tlsnHarness) return "";
   try {
     const { presentationJSON } = await tlsnHarness.prove(
       url,
       TLSN_MAX_RECV,
       PROOF_TIMEOUT_MS,
+      creds,
     );
     const proofBlob = await uploadToWalrus(JSON.stringify(presentationJSON), {
       publisher: WALRUS_PUBLISHER,
       contentType: "application/json",
     });
-    console.log(`  TLSNotary proof uploaded to Walrus: ${proofBlob}`);
+    console.log(
+      `  ✓ TLSNotary proof verified + uploaded to Walrus: ${proofBlob}`,
+    );
     return proofBlob;
   } catch (err) {
     console.warn(`  TLSNotary proof skipped: ${(err as Error).message}`);
@@ -300,6 +425,11 @@ async function main() {
   );
   console.log(`address=${address}`);
   console.log(`Package=${PKG}\nMarket=${MARKET}\nPolling every ${POLL_MS}ms…`);
+  console.log(
+    HITL_ENABLED
+      ? `Human-in-the-loop CAPTCHA solving ON · timeout=${Math.round(HITL_TIMEOUT_MS / 1000)}s`
+      : "Human-in-the-loop CAPTCHA solving OFF (set SCANNER_HITL=1 in an interactive terminal)",
+  );
   const browser = await ENGINES[CAP_ENGINE].launch({ headless: true });
 
   if (TLSN_ENABLED) {
@@ -342,11 +472,35 @@ async function main() {
       }
       handled.add(jobId);
       console.log(`\n→ scanning ${scanUrl} [${claim.params}] for job ${jobId}`);
-      const { screenshot, html } = await capture(browser, scanUrl);
+      let { screenshot, html } = await capture(browser, scanUrl);
+
+      // Bot-wall / CAPTCHA: the headless capture can't get past it, so hand off
+      // to a human in a real browser and re-capture the unblocked page.
+      let proofCreds: { cookies?: string; userAgent?: string } = {};
+      const captcha = detectCaptcha(html);
+      if (captcha) {
+        if (!HITL_ENABLED) {
+          console.warn(
+            `  ✗ ${captcha} CAPTCHA on ${scanUrl} and human-in-the-loop is off (SCANNER_HITL=0 or no TTY) — skipping job.`,
+          );
+          return;
+        }
+        const solved = await humanSolveCaptcha(scanUrl, captcha);
+        if (!solved) return;
+        screenshot = solved.screenshot;
+        html = solved.html;
+        proofCreds = { cookies: solved.cookies, userAgent: solved.userAgent };
+      }
+      console.log(
+        `  ✓ captured page · ${(html.length / 1024).toFixed(1)} KB html · ${(screenshot.length / 1024).toFixed(1)} KB screenshot`,
+      );
 
       let proofBlob = "";
       if (TLSN_ENABLED) {
-        proofBlob = await proveAndUpload(scanUrl);
+        console.log(
+          `  → generating TLSNotary proof via ${TLSN_NOTARY_URL} (up to ${Math.round(PROOF_TIMEOUT_MS / 1000)}s)…`,
+        );
+        proofBlob = await proveAndUpload(scanUrl, proofCreds);
         if (!proofBlob) {
           console.warn(
             `  ✗ no TLSNotary proof for ${scanUrl} — not submitting (TLSNotary required, no fallback)`,
@@ -355,6 +509,7 @@ async function main() {
         }
       }
 
+      console.log("  → uploading screenshot + html to Walrus…");
       const ssBlob = await uploadToWalrus(screenshot, {
         publisher: WALRUS_PUBLISHER,
         contentType: "image/png",
@@ -364,7 +519,7 @@ async function main() {
         contentType: "text/html",
       });
       console.log(
-        `  uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
+        `  ✓ uploaded to Walrus: screenshot=${ssBlob} html=${htmlBlob}`,
       );
 
       // If the job target is an ENS name, attach its resolved metadata too.
@@ -378,8 +533,9 @@ async function main() {
             contentType: "application/json",
           },
         );
-        console.log(`  ENS metadata uploaded: ${ensMetaBlob}`);
+        console.log(`  ✓ ENS metadata uploaded: ${ensMetaBlob}`);
       }
+      console.log("  → submitting scan on-chain…");
       const digest = await submit(
         jobId,
         ssBlob,
@@ -387,7 +543,7 @@ async function main() {
         proofBlob,
         ensMetaBlob,
       );
-      console.log(`  submitted (pending verification) · digest=${digest}`);
+      console.log(`  ✓ submitted — pending verifier payout · digest=${digest}`);
       return;
     }
   };
