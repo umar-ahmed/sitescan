@@ -40,13 +40,13 @@ interface RegionT {
 }
 
 const REGIONS: RegionT[] = [
-  { code: "NA", name: "North America", lat: 45, lng: -100, coverage: 6 },
-  { code: "LATAM", name: "Latin America", lat: -15, lng: -60, coverage: 2 },
-  { code: "EU_W", name: "West Europe", lat: 48, lng: 8, coverage: 5 },
-  { code: "EU_E", name: "East Europe", lat: 52, lng: 38, coverage: 2 },
-  { code: "MEA", name: "Middle East & Africa", lat: 8, lng: 25, coverage: 1 },
-  { code: "APAC", name: "Asia Pacific", lat: 22, lng: 100, coverage: 4 },
-  { code: "OCEANIA", name: "Oceania", lat: -25, lng: 140, coverage: 0 },
+  { code: "NA", name: "North America", lat: 39.04, lng: -77.49, coverage: 6 },
+  { code: "LATAM", name: "Latin America", lat: -23.55, lng: -46.63, coverage: 2 },
+  { code: "EU_W", name: "West Europe", lat: 50.11, lng: 8.68, coverage: 5 },
+  { code: "EU_E", name: "East Europe", lat: 52.23, lng: 21.01, coverage: 2 },
+  { code: "MEA", name: "Middle East & Africa", lat: 25.2, lng: 55.27, coverage: 1 },
+  { code: "APAC", name: "Asia Pacific", lat: 1.35, lng: 103.82, coverage: 4 },
+  { code: "OCEANIA", name: "Oceania", lat: -33.87, lng: 151.21, coverage: 0 },
 ];
 
 type Step = "url" | "regions" | "device" | "review" | "launching" | "results";
@@ -197,9 +197,11 @@ export function ScanExperience() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["jobs"] });
-      setLaunchDone(true);
-      // Hold on the "deployed" beat, then reveal the live results wall.
-      window.setTimeout(() => setStep("results"), 1400);
+      // Tx confirmed — now play the cinematic launch, then the results wall.
+      setLaunchDone(false);
+      setStep("launching");
+      window.setTimeout(() => setLaunchDone(true), 1500);
+      window.setTimeout(() => setStep("results"), 2600);
     },
     onError: (err) => {
       console.error(err);
@@ -207,11 +209,12 @@ export function ScanExperience() {
     },
   });
 
-  // Real launch: enter the cinematic, then sign + post on-chain.
+  // Real launch: sign + post on-chain first (button shows in-flight state),
+  // then the cinematic plays on success. Avoids a long static "deploying"
+  // beat while the wallet popup is open.
   const startLaunch = () => {
     setPreviewMode(false);
     setLaunchDone(false);
-    setStep("launching");
     launch.mutate();
   };
 
@@ -224,8 +227,8 @@ export function ScanExperience() {
     setPreviewMode(true);
     setLaunchDone(false);
     setStep("launching");
-    window.setTimeout(() => setLaunchDone(true), 1400);
-    window.setTimeout(() => setStep("results"), 1900);
+    window.setTimeout(() => setLaunchDone(true), 1500);
+    window.setTimeout(() => setStep("results"), 2600);
   };
 
   return (
@@ -242,6 +245,7 @@ export function ScanExperience() {
           selected={regions}
           onToggle={toggleRegion}
           interactive={step === "regions"}
+          launching={step === "launching"}
           arcs={arcs}
         />
       </Suspense>
@@ -262,15 +266,21 @@ export function ScanExperience() {
         }}
       />
 
-      {/* Demo shortcut: simulate all jobs filled and jump to the results wall. */}
+      {/* Hidden demo fallback: simulate all jobs filled and jump to the results wall. */}
       {step !== "launching" && step !== "results" && (
         <button
           onClick={previewLaunch}
-          title="Preview results with sample data"
-          className="pointer-events-auto absolute right-4 top-4 z-20 inline-flex items-center gap-1.5 rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs text-white/80 backdrop-blur transition hover:bg-white/20"
+          title="Preview results (demo)"
+          aria-label="Preview results (demo)"
+          className="pointer-events-auto absolute right-3 top-3 z-20 inline-flex h-6 w-6 items-center justify-center rounded-full text-white/30 transition hover:bg-white/10 hover:text-white/70"
         >
-          <Play className="h-3.5 w-3.5" /> Preview
+          <Play className="h-3 w-3" />
         </button>
+      )}
+
+      {/* Persistent node-density legend whenever the globe is the focus. */}
+      {(step === "regions" || step === "review" || step === "launching") && (
+        <GlobeLegend />
       )}
 
       <div className="pointer-events-none relative z-10 mx-auto flex min-h-[620px] max-w-3xl flex-col px-4 pt-5">
@@ -324,6 +334,7 @@ export function ScanExperience() {
                 totalScans={totalScans}
                 total={total}
                 connected={!!account}
+                launching={launch.isPending}
                 error={launch.error as Error | null}
                 onBack={() => setStep("device")}
                 onLaunch={startLaunch}
@@ -370,6 +381,30 @@ function Slide({ children }: { children: React.ReactNode }) {
   );
 }
 
+function GlobeLegend() {
+  const items = [
+    { color: "#3fd0a8", label: "many nodes" },
+    { color: "#ffb454", label: "few · slower" },
+    { color: "#ff5e5e", label: "none" },
+  ];
+  return (
+    <div className="pointer-events-none absolute bottom-4 left-4 z-20 flex flex-col gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-[11px] text-white/60 backdrop-blur">
+      <span className="text-[10px] uppercase tracking-wide text-white/40">
+        Scanner nodes
+      </span>
+      {items.map((it) => (
+        <span key={it.label} className="inline-flex items-center gap-1.5">
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ background: it.color }}
+          />
+          {it.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function StepBar({ step }: { step: Step }) {
   const steps: { id: Step; label: string }[] = [
     { id: "url", label: "URL" },
@@ -377,7 +412,10 @@ function StepBar({ step }: { step: Step }) {
     { id: "device", label: "Devices" },
     { id: "review", label: "Launch" },
   ];
-  const idx = steps.findIndex((s) => s.id === step);
+  // launching/results come after the bar's last step — treat them as the
+  // flow being complete so every pill stays lit instead of going dark.
+  const rawIdx = steps.findIndex((s) => s.id === step);
+  const idx = rawIdx === -1 ? steps.length : rawIdx;
   return (
     <div className="my-5 flex items-center justify-center gap-2">
       {steps.map((s, i) => (
@@ -467,7 +505,7 @@ function RegionStep({
   const fewNodes = selected.filter((r) => r.coverage > 0 && r.coverage <= 2);
 
   return (
-    <div className="flex flex-1 flex-col py-4">
+    <div className="flex flex-1 flex-col py-6">
       <div className="text-center">
         <h2 className="text-2xl font-semibold tracking-tight">
           Where should we view it from?
@@ -476,29 +514,6 @@ function RegionStep({
           Drag to spin the globe and click regions. The pulsing lights show
           where scanner nodes are active.
         </p>
-        <div className="mt-3 flex items-center justify-center gap-4 text-xs text-white/60">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ background: "#3fd0a8" }}
-            />
-            many nodes
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ background: "#ffb454" }}
-            />
-            few · slower
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              className="h-2 w-2 rounded-full"
-              style={{ background: "#ff5e5e" }}
-            />
-            none
-          </span>
-        </div>
       </div>
 
       <div className="flex-1" />
@@ -587,7 +602,7 @@ function DeviceStep({
     devices.some((d) => browserAllowed(d, b));
 
   return (
-    <div className="pointer-events-auto py-4">
+    <div className="pointer-events-auto py-6">
       <div className="text-center">
         <h2 className="text-2xl font-semibold tracking-tight">
           Build the victim devices
@@ -732,7 +747,7 @@ function DeviceFrame({
   if (isPhone) {
     return (
       <div
-        className="flex flex-col overflow-hidden border-[3px] border-[#1a1530] bg-card text-foreground shadow-xl shadow-black/40"
+        className="flex flex-col overflow-hidden border-[3px] border-[#1a1530] bg-card text-foreground shadow-xl shadow-black/40 ring-1 ring-white/10"
         style={{ width: 116, height: 210, borderRadius: 22 }}
       >
         {device === "iphone" ? (
@@ -754,7 +769,7 @@ function DeviceFrame({
 
   return (
     <div
-      className="flex flex-col overflow-hidden border bg-card text-foreground shadow-xl shadow-black/40"
+      className="flex flex-col overflow-hidden border bg-card text-foreground shadow-xl shadow-black/40 ring-1 ring-white/10"
       style={{ width: 210, height: 150, borderRadius: 8 }}
     >
       <div className="flex items-center gap-1 border-b bg-muted px-2 py-1">
@@ -794,6 +809,7 @@ function ReviewStep({
   totalScans,
   total,
   connected,
+  launching,
   error,
   onBack,
   onLaunch,
@@ -804,6 +820,7 @@ function ReviewStep({
   totalScans: number;
   total: number;
   connected: boolean;
+  launching: boolean;
   error: Error | null;
   onBack: () => void;
   onLaunch: () => void;
@@ -812,7 +829,7 @@ function ReviewStep({
     <div className="pointer-events-auto mx-auto max-w-2xl py-6">
       <div className="text-center">
         <h2 className="text-2xl font-semibold tracking-tight">Ready to scan</h2>
-        <p className="mt-1 text-sm text-white/60">
+        <p className="mt-2 text-sm text-white/60">
           {totalScans} scan{totalScans === 1 ? "" : "s"} of{" "}
           <span className="font-mono">{url}</span>
         </p>
@@ -879,10 +896,18 @@ function ReviewStep({
           {connected ? (
             <button
               onClick={onLaunch}
-              disabled={totalScans === 0}
-              className="rounded-md bg-white px-8 py-2.5 text-sm font-medium text-[#0a0820] transition hover:bg-white/90 disabled:opacity-50"
+              disabled={totalScans === 0 || launching}
+              className="inline-flex items-center gap-2 rounded-md bg-white px-8 py-2.5 text-sm font-medium text-[#0a0820] transition hover:bg-white/90 disabled:opacity-50"
             >
-              Launch {totalScans} scan{totalScans === 1 ? "" : "s"}
+              {launching ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Launching…
+                </>
+              ) : (
+                <>
+                  Launch {totalScans} scan{totalScans === 1 ? "" : "s"}
+                </>
+              )}
             </button>
           ) : (
             <ConnectButton />
@@ -917,10 +942,10 @@ function LaunchingView({
           </>
         ) : (
           <>
-            <Radar
-              className="mx-auto h-14 w-14 text-white/85"
-              style={{ animation: "spin 3s linear infinite" }}
-            />
+            <div className="relative mx-auto h-14 w-14">
+              <span className="absolute inset-0 animate-ping rounded-full bg-white/10" />
+              <Radar className="relative mx-auto h-14 w-14 animate-spin text-white/85 [animation-duration:3s]" />
+            </div>
             <div className="mt-3 text-2xl font-semibold tracking-tight">
               Deploying scanners…
             </div>
@@ -1190,7 +1215,7 @@ function ResultFrame({
   } else {
     screen = (
       <div className="flex h-full flex-col items-center justify-center gap-1 bg-muted text-[9px] text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> waiting for a node…
+        <Loader2 className="h-4 w-4 animate-spin" /> awaiting a node…
       </div>
     );
   }
