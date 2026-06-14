@@ -1023,6 +1023,49 @@ function timeAgo(ms: number): string {
   return `${Math.round(s / 60)}m ago`;
 }
 
+function ScanProgress({
+  total,
+  captured,
+  verified,
+}: {
+  total: number;
+  captured: number;
+  verified: number;
+}) {
+  if (total === 0) return null;
+  const capturedPct = (captured / total) * 100;
+  const verifiedPct = (verified / total) * 100;
+  const allCaptured = captured >= total;
+  const complete = verified >= total;
+  const label = complete
+    ? `Scan complete — ${verified}/${total} verified`
+    : allCaptured
+      ? `Verifying proofs — ${verified}/${total} verified`
+      : `Capturing — ${captured}/${total} nodes reported`;
+  return (
+    <div className="mt-3">
+      <div className="mb-1.5 flex items-center gap-1.5 text-xs text-white/60">
+        {complete ? (
+          <CheckCircle2 className="h-3 w-3 text-emerald-300" />
+        ) : (
+          <Loader2 className="h-3 w-3 animate-spin" />
+        )}
+        <span>{label}</span>
+      </div>
+      <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-white/30 transition-all duration-500 ease-out"
+          style={{ width: `${capturedPct}%` }}
+        />
+        <div
+          className="absolute inset-y-0 left-0 rounded-full bg-emerald-400/80 transition-all duration-500 ease-out"
+          style={{ width: `${verifiedPct}%` }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function ScanResults({
   url,
   regions,
@@ -1041,6 +1084,9 @@ function ScanResults({
   const { marketId } = useScanConfig();
   // Stable base time so "captured N ago" doesn't jitter across renders.
   const [baseTime] = useState(() => Date.now());
+  // Preview reveals vantages one-by-one so the progress bar visibly fills and
+  // nodes "report in" (live mode fills naturally via polling).
+  const [revealed, setRevealed] = useState(0);
 
   const { data: jobs = [] } = useQuery({
     queryKey: ["scan-results", marketId, url, account?.address],
@@ -1060,11 +1106,22 @@ function ScanResults({
   const vantages: Vantage[] = [];
   for (const region of regions)
     for (const profile of profiles) vantages.push({ region, profile });
+  const totalVantages = vantages.length;
+
+  useEffect(() => {
+    if (!preview) return;
+    setRevealed(0);
+    const timers: number[] = [];
+    for (let i = 1; i <= totalVantages; i++)
+      timers.push(window.setTimeout(() => setRevealed(i), 500 + i * 650));
+    return () => timers.forEach((t) => window.clearTimeout(t));
+  }, [preview, totalVantages]);
 
   const models: ResultModel[] = vantages.map((v, i) => {
     if (preview) {
-      // All vantages capture the same live page → one content cluster (no
-      // simulated cloaking), with the real screenshot dropped into each frame.
+      // Reveal progressively: not-yet-reported vantages read as "waiting" so the
+      // progress bar fills. All capture the same page → one content cluster.
+      if (i >= revealed) return { state: "waiting" };
       return {
         state: "verified",
         screenshotUrl: previewShotUrl(url),
@@ -1127,12 +1184,6 @@ function ScanResults({
           )}
         </div>
         <div className="flex items-center gap-3">
-          <div className="text-right text-xs text-white/60">
-            <div className="tabular-nums text-white">
-              {captured}/{vantages.length} captured
-            </div>
-            <div className="tabular-nums">{verified} verified</div>
-          </div>
           <button
             onClick={onNewScan}
             className="inline-flex items-center gap-1.5 rounded-md border border-white/25 px-3 py-2 text-sm text-white/80 transition hover:bg-white/10"
@@ -1141,6 +1192,12 @@ function ScanResults({
           </button>
         </div>
       </div>
+
+      <ScanProgress
+        total={vantages.length}
+        captured={captured}
+        verified={verified}
+      />
 
       <div className="mt-4 flex max-h-[440px] flex-wrap justify-center gap-x-5 gap-y-6 overflow-y-auto pb-2">
         {vantages.map((v, i) => (
