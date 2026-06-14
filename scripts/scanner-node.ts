@@ -183,12 +183,12 @@ async function capture(
   return { screenshot, html };
 }
 
-async function submit(jobId: string, ssBlob: string, htmlBlob: string) {
+async function submit(jobId: string, ssBlob: string, htmlBlob: string, ensMetaBlob: string) {
   const tx = new Transaction();
   tx.add(
     submitScan({
       package: PKG,
-      arguments: { job: jobId, screenshotBlobId: ssBlob, htmlBlobId: htmlBlob },
+      arguments: { job: jobId, screenshotBlobId: ssBlob, htmlBlobId: htmlBlob, ensMetadataBlobId: ensMetaBlob },
     }),
   );
   const res = await client.signAndExecuteTransaction({
@@ -248,15 +248,16 @@ async function main() {
         );
 
         // Optional: upload ENS metadata if the job target is an ENS name
+        let ensMetaBlob = "";
         const ensMetadata = await fetchEnsMetadata(claim.url).catch(() => null);
         if (ensMetadata) {
-          const ensMetaBlob = await uploadToWalrus(
+          ensMetaBlob = await uploadToWalrus(
             JSON.stringify(ensMetadata, null, 2),
             { publisher: WALRUS_PUBLISHER, contentType: "application/json" },
           );
           console.log(`  ENS metadata uploaded: ${ensMetaBlob}`);
         }
-        const digest = await submit(jobId, ssBlob, htmlBlob);
+        const digest = await submit(jobId, ssBlob, htmlBlob, ensMetaBlob);
         console.log(`  submitted (pending verification) · digest=${digest}`);
       }
     } catch (err) {

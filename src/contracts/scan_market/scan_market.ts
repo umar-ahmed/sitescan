@@ -40,6 +40,7 @@ export const Submission = new MoveStruct({ name: `${$moduleName}::Submission`, f
         worker: bcs.Address,
         screenshot_blob_id: bcs.string(),
         html_blob_id: bcs.string(),
+        ens_metadata_blob_id: bcs.string(),
         status: bcs.u8(),
         paid: bcs.u64(),
         verdict_reason: bcs.string(),
@@ -79,7 +80,8 @@ export const ScanSubmitted = new MoveStruct({ name: `${$moduleName}::ScanSubmitt
         index: bcs.u64(),
         worker: bcs.Address,
         screenshot_blob_id: bcs.string(),
-        html_blob_id: bcs.string()
+        html_blob_id: bcs.string(),
+        ens_metadata_blob_id: bcs.string()
     } });
 export const ScanResolved = new MoveStruct({ name: `${$moduleName}::ScanResolved`, fields: {
         job_id: bcs.Address,
@@ -135,13 +137,15 @@ export interface SubmitScanArguments {
     job: RawTransactionArgument<string>;
     screenshotBlobId: RawTransactionArgument<string>;
     htmlBlobId: RawTransactionArgument<string>;
+    ensMetadataBlobId: RawTransactionArgument<string>;
 }
 export interface SubmitScanOptions {
     package?: string;
     arguments: SubmitScanArguments | [
         job: RawTransactionArgument<string>,
         screenshotBlobId: RawTransactionArgument<string>,
-        htmlBlobId: RawTransactionArgument<string>
+        htmlBlobId: RawTransactionArgument<string>,
+        ensMetadataBlobId: RawTransactionArgument<string>
     ];
 }
 /**
@@ -155,9 +159,10 @@ export function submitScan(options: SubmitScanOptions) {
     const argumentsTypes = [
         null,
         '0x1::string::String',
+        '0x1::string::String',
         '0x1::string::String'
     ] satisfies (string | null)[];
-    const parameterNames = ["job", "screenshotBlobId", "htmlBlobId"];
+    const parameterNames = ["job", "screenshotBlobId", "htmlBlobId", "ensMetadataBlobId"];
     return (tx: Transaction) => tx.moveCall({
         package: packageAddress,
         module: 'scan_market',

@@ -30,6 +30,7 @@ export interface Submission {
   worker: string;
   screenshot_blob_id: string;
   html_blob_id: string;
+  ens_metadata_blob_id: string;
   status: number;
   paid: string | number | bigint;
   verdict_reason: string;
@@ -350,6 +351,16 @@ function VantageBlock({
                 className="text-[var(--color-ring)] hover:underline"
               >
                 html
+              </a>
+            )}
+            {sub?.ens_metadata_blob_id && (
+              <a
+                href={walrusAggregatorUrl(sub.ens_metadata_blob_id)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[var(--color-ring)] hover:underline"
+              >
+                ENS info
               </a>
             )}
           </div>

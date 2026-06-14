@@ -54,6 +54,7 @@ module scan_market::scan_market {
         worker: address,
         screenshot_blob_id: String,
         html_blob_id: String,
+        ens_metadata_blob_id: String,
         status: u8,
         paid: u64,
         verdict_reason: String,
@@ -96,6 +97,7 @@ module scan_market::scan_market {
         worker: address,
         screenshot_blob_id: String,
         html_blob_id: String,
+        ens_metadata_blob_id: String,
     }
 
     public struct ScanResolved has copy, drop {
@@ -175,6 +177,7 @@ module scan_market::scan_market {
         job: &mut ScanJob,
         screenshot_blob_id: String,
         html_blob_id: String,
+        ens_metadata_blob_id: String,
         ctx: &mut TxContext,
     ) {
         assert!(job.status == STATUS_OPEN, EJobNotOpen);
@@ -186,6 +189,7 @@ module scan_market::scan_market {
             worker,
             screenshot_blob_id,
             html_blob_id,
+            ens_metadata_blob_id,
             status: SUB_PENDING,
             paid: 0,
             verdict_reason: string::utf8(b""),
@@ -198,6 +202,7 @@ module scan_market::scan_market {
             worker,
             screenshot_blob_id,
             html_blob_id,
+            ens_metadata_blob_id,
         });
     }
 
