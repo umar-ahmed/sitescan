@@ -204,7 +204,7 @@ export function ScanGroup({ group }: { group: ScanGroupData }) {
           )}
 
           {cloaking && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+            <div className="rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-2 text-xs text-amber-200">
               <span className="inline-flex items-center gap-1 font-medium">
                 <AlertTriangle className="h-3 w-3" /> Possible cloaking ·{" "}
                 {clusterList.length} content clusters
@@ -242,13 +242,13 @@ function VerdictPill({
 }) {
   if (cloaking)
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-100 px-2 py-1 text-xs font-medium text-amber-800">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-amber-400/15 px-2 py-1 text-xs font-medium text-amber-300">
         <AlertTriangle className="h-3.5 w-3.5" /> cloaking
       </span>
     );
   if (verified > 0 && verified >= wanted)
     return (
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-100 px-2 py-1 text-xs font-medium text-emerald-800">
+      <span className="inline-flex shrink-0 items-center gap-1 rounded-md bg-emerald-400/15 px-2 py-1 text-xs font-medium text-emerald-300">
         <ShieldCheck className="h-3.5 w-3.5" /> consistent
       </span>
     );
@@ -432,13 +432,13 @@ function SubStatus({
 }) {
   if (status === SUB_APPROVED)
     return (
-      <div className="tabular-nums text-emerald-700">
+      <div className="tabular-nums text-emerald-300">
         paid {mistToSui(BigInt(paid))} SUI
       </div>
     );
   if (status === SUB_REJECTED)
-    return <div className="text-red-600">rejected · not paid</div>;
-  return <div className="text-amber-700">awaiting verification</div>;
+    return <div className="text-red-300">rejected · not paid</div>;
+  return <div className="text-amber-300">awaiting verification</div>;
 }
 
 // Surfaces the TLSNotary provenance layer: whether the scanner attached a proof
@@ -456,7 +456,7 @@ function NotaryBadge({ submission }: { submission: Submission }) {
   if (submission.status === SUB_APPROVED)
     return (
       <span
-        className="inline-flex items-center gap-1 font-medium text-violet-700"
+        className="inline-flex items-center gap-1 font-medium text-violet-300"
         title="TLSNotary proof verified: the target host served this HTML over TLS, notary-signed"
       >
         <Lock className="h-3 w-3" /> TLS-proven · notary-signed
@@ -465,14 +465,14 @@ function NotaryBadge({ submission }: { submission: Submission }) {
   if (submission.status === SUB_REJECTED)
     return (
       <span
-        className="inline-flex items-center gap-1 text-red-700"
+        className="inline-flex items-center gap-1 text-red-300"
         title="TLSNotary proof failed provenance verification"
       >
         <ShieldX className="h-3 w-3" /> TLS proof rejected
       </span>
     );
   return (
-    <span className="inline-flex items-center gap-1 text-amber-700">
+    <span className="inline-flex items-center gap-1 text-amber-300">
       <Lock className="h-3 w-3" /> TLS proof · verifying
     </span>
   );
