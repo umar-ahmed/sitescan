@@ -28,15 +28,12 @@ export function PostJob() {
   const queryClient = useQueryClient();
   const { packageId, marketId } = useScanConfig();
 
-  const [input, setInput] = useState("https://example.com");
+  const [url, setUrl] = useState("https://example.com");
   const [geo, setGeo] = useState(GEOS[0]);
   const [device, setDevice] = useState(DEVICES[0]);
   const [browser, setBrowser] = useState(BROWSERS[0]);
   const [reward, setReward] = useState("0.05");
   const [scans, setScans] = useState("2");
-
-  // The actual URL to scan: convert ENS name to gateway URL or use direct input
-  const url = isEnsName(input) ? ensToUrl(input) : input;
 
   // Resolve ENS name when input changes
   const mutation = useMutation({
@@ -93,13 +90,13 @@ export function PostJob() {
           <label className="text-sm font-medium">Target URL or ENS name</label>
           <input
             className={inputClass}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
             placeholder="https://... or name.eth"
           />
-          {isEnsName(input) && (
+          {isEnsName(url) && (
             <p className="text-xs text-muted-foreground">
-              Will scan: {ensToUrl(input)}
+              Will scan: {ensToUrl(url)}
             </p>
           )}
         </div>
