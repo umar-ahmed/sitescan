@@ -8,10 +8,10 @@
 /// - Scan nodes each render the URL, upload the screenshot + HTML to Walrus, and
 ///   submit the resulting blob ids. A submission is recorded as PENDING and is
 ///   paid nothing yet.
-/// - An independent verifier (the market `verifier` address; in production the
-///   CRE DON report, in the demo the Terminal C oracle key) calls `resolve_scan`
-///   per submission. Approved scans release their portion to the worker; rejected
-///   scans keep their funds in escrow for a re-scan or later reclaim.
+/// - An independent verifier (the market `verifier` address) re-checks each
+///   submission's TLSNotary proof and calls `resolve_scan` per submission.
+///   Approved scans release their portion to the worker; rejected scans keep
+///   their funds in escrow for a re-scan or later reclaim.
 /// - A job completes once `max_submissions` scans are approved. The requester can
 ///   reclaim any remaining escrow (rejected-scan funds + rounding dust) once the
 ///   job is completed or cancelled.
@@ -44,13 +44,12 @@ module scan_market::scan_market {
     public struct Market has key {
         id: UID,
         jobs: vector<ID>,
-        /// Address allowed to approve/reject scans (the verification oracle).
+        /// Address allowed to approve/reject scans (the verifier).
         verifier: address,
     }
 
     /// A single scan submitted by a node. Paid only once the verifier approves it.
-    /// `verdict_reason` and `content_hash` are written by the verifier on resolve
-    /// and hold the CRE verification output on-chain.
+    /// `verdict_reason` and `content_hash` are written by the verifier on resolve.
     public struct Submission has store, copy, drop {
         worker: address,
         screenshot_blob_id: String,
