@@ -18,16 +18,20 @@
     "@nanostores/react": "^1.0.0",
     "@tanstack/react-query": "^5.90.16",
     "clsx": "^2.1.1",
+    "framer-motion": "^12.40.0",
     "lucide-react": "^0.562.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "tailwind-merge": "^3.4.0"
+    "react-globe.gl": "^2.38.0",
+    "tailwind-merge": "^3.4.0",
+    "three": "^0.184.0"
   },
   "devDependencies": {
     "@mysten/codegen": "^0.10.6",
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.2.8",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "^0.184.1",
     "@vitejs/plugin-react-swc": "^4.2.2",
     "playwright": "^1.60.0",
     "prettier": "^3.7.4",
