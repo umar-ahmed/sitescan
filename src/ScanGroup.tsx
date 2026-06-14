@@ -32,6 +32,7 @@ export interface Submission {
   screenshot_blob_id: string;
   html_blob_id: string;
   notary_proof_blob_id: string;
+  ens_metadata_blob_id: string;
   status: number;
   paid: string | number | bigint;
   verdict_reason: string;
@@ -385,6 +386,16 @@ function VantageBlock({
                 className="inline-flex items-center gap-0.5 text-violet-700 hover:underline"
               >
                 <FileCheck2 className="h-3 w-3" /> TLS proof
+              </a>
+            )}
+            {sub?.ens_metadata_blob_id && (
+              <a
+                href={walrusAggregatorUrl(sub.ens_metadata_blob_id)}
+                target="_blank"
+                rel="noreferrer"
+                className="text-[var(--color-ring)] hover:underline"
+              >
+                ENS info
               </a>
             )}
           </div>

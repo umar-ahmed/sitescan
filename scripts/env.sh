@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
 # Deployed scan_market addresses on Sui testnet.
-export SCAN_PKG="0x3b93a7619e0e669afc51ab8a32f52183209c233ceae6b5ce9a5694cf595c9b4a"
-export SCAN_MARKET="0xdc011f87b4c99a680bc2274a95284cee1b7759d4101f96af1f2f51af03b21f9c"
+export SCAN_PKG="0xe6da54d4429b8cbb7e9e3474d9801fdf8d522cbd10aeb9a5aaa8c243fc857d93"
+export SCAN_MARKET="0xbe1e58c488c9b206413d1c9015f4ae2ca944226bd3ba70e6188f1034b654e37d"
 export SCAN_GAS_BUDGET="100000000"

@@ -45,6 +45,8 @@ export const Submission = new MoveStruct({ name: `${$moduleName}::Submission`, f
          * target host over TLS. Empty if the node submitted no proof.
          */
         notary_proof_blob_id: bcs.string(),
+        /** Walrus blob id of the resolved ENS metadata, when the target is an ENS name. */
+        ens_metadata_blob_id: bcs.string(),
         status: bcs.u8(),
         paid: bcs.u64(),
         verdict_reason: bcs.string(),
@@ -85,7 +87,8 @@ export const ScanSubmitted = new MoveStruct({ name: `${$moduleName}::ScanSubmitt
         worker: bcs.Address,
         screenshot_blob_id: bcs.string(),
         html_blob_id: bcs.string(),
-        notary_proof_blob_id: bcs.string()
+        notary_proof_blob_id: bcs.string(),
+        ens_metadata_blob_id: bcs.string()
     } });
 export const ScanResolved = new MoveStruct({ name: `${$moduleName}::ScanResolved`, fields: {
         job_id: bcs.Address,
@@ -142,6 +145,7 @@ export interface SubmitScanArguments {
     screenshotBlobId: RawTransactionArgument<string>;
     htmlBlobId: RawTransactionArgument<string>;
     notaryProofBlobId: RawTransactionArgument<string>;
+    ensMetadataBlobId: RawTransactionArgument<string>;
 }
 export interface SubmitScanOptions {
     package?: string;
@@ -149,14 +153,16 @@ export interface SubmitScanOptions {
         job: RawTransactionArgument<string>,
         screenshotBlobId: RawTransactionArgument<string>,
         htmlBlobId: RawTransactionArgument<string>,
-        notaryProofBlobId: RawTransactionArgument<string>
+        notaryProofBlobId: RawTransactionArgument<string>,
+        ensMetadataBlobId: RawTransactionArgument<string>
     ];
 }
 /**
  * Record a completed scan (Walrus blob ids) as PENDING. Pays nothing until the
  * verifier approves it. New scans are accepted while the number of approved +
  * pending scans is below `max_submissions`, so a rejected scan reopens a slot for
- * a re-scan.
+ * a re-scan. Each worker may submit at most one scan per job, so `max_submissions`
+ * always reflects independent scanners.
  */
 export function submitScan(options: SubmitScanOptions) {
     const packageAddress = options.package ?? '@local-pkg/scan_market';
@@ -164,9 +170,10 @@ export function submitScan(options: SubmitScanOptions) {
         null,
         '0x1::string::String',
         '0x1::string::String',
+        '0x1::string::String',
         '0x1::string::String'
     ] satisfies (string | null)[];
-    const parameterNames = ["job", "screenshotBlobId", "htmlBlobId", "notaryProofBlobId"];
+    const parameterNames = ["job", "screenshotBlobId", "htmlBlobId", "notaryProofBlobId", "ensMetadataBlobId"];
     return (tx: Transaction) => tx.moveCall({
         package: packageAddress,
         module: 'scan_market',

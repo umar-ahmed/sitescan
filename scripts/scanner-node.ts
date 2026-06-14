@@ -92,7 +92,9 @@ const CAP_ENGINE: Engine = ENGINE_OF[CAP.browser] ?? "chromium";
 // region. Geo is vantage metadata only (the node doesn't truly geolocate), so a
 // single node can sequentially serve every geo's jobs. Device/browser still
 // matter because they change how the page is actually rendered.
-const IGNORE_GEO = /^(1|true|yes|on)$/i.test(process.env.SCANNER_IGNORE_GEO ?? "");
+const IGNORE_GEO = /^(1|true|yes|on)$/i.test(
+  process.env.SCANNER_IGNORE_GEO ?? "",
+);
 
 // Build the browser-context options once: emulate the chosen device accurately,
 // dropping the mobile-only fields that Firefox's engine doesn't support.
@@ -266,6 +268,7 @@ async function submit(
   ssBlob: string,
   htmlBlob: string,
   proofBlob: string,
+  ensMetaBlob: string,
 ) {
   const tx = new Transaction();
   tx.add(
@@ -276,6 +279,7 @@ async function submit(
         screenshotBlobId: ssBlob,
         htmlBlobId: htmlBlob,
         notaryProofBlobId: proofBlob,
+        ensMetadataBlobId: ensMetaBlob,
       },
     }),
   );
@@ -364,15 +368,25 @@ async function main() {
       );
 
       // If the job target is an ENS name, attach its resolved metadata too.
+      let ensMetaBlob = "";
       const ensMetadata = await fetchEnsMetadata(claim.url).catch(() => null);
       if (ensMetadata) {
-        const ensMetaBlob = await uploadToWalrus(
+        ensMetaBlob = await uploadToWalrus(
           JSON.stringify(ensMetadata, null, 2),
-          { publisher: WALRUS_PUBLISHER, contentType: "application/json" },
+          {
+            publisher: WALRUS_PUBLISHER,
+            contentType: "application/json",
+          },
         );
         console.log(`  ENS metadata uploaded: ${ensMetaBlob}`);
       }
-      const digest = await submit(jobId, ssBlob, htmlBlob, proofBlob);
+      const digest = await submit(
+        jobId,
+        ssBlob,
+        htmlBlob,
+        proofBlob,
+        ensMetaBlob,
+      );
       console.log(`  submitted (pending verification) · digest=${digest}`);
       return;
     }
