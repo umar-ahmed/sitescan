@@ -16,10 +16,10 @@
  * - Scan nodes each render the URL, upload the screenshot + HTML to Walrus, and
  *   submit the resulting blob ids. A submission is recorded as PENDING and is paid
  *   nothing yet.
- * - An independent verifier (the market `verifier` address; in production the CRE
- *   DON report, in the demo the Terminal C oracle key) calls `resolve_scan` per
- *   submission. Approved scans release their portion to the worker; rejected scans
- *   keep their funds in escrow for a re-scan or later reclaim.
+ * - An independent verifier (the market `verifier` address) re-checks each
+ *   submission's TLSNotary proof and calls `resolve_scan` per submission. Approved
+ *   scans release their portion to the worker; rejected scans keep their funds in
+ *   escrow for a re-scan or later reclaim.
  * - A job completes once `max_submissions` scans are approved. The requester can
  *   reclaim any remaining escrow (rejected-scan funds + rounding dust) once the
  *   job is completed or cancelled.
@@ -33,7 +33,7 @@ const $moduleName = '@local-pkg/scan_market::scan_market';
 export const Market = new MoveStruct({ name: `${$moduleName}::Market`, fields: {
         id: bcs.Address,
         jobs: bcs.vector(bcs.Address),
-        /** Address allowed to approve/reject scans (the verification oracle). */
+        /** Address allowed to approve/reject scans (the verifier). */
         verifier: bcs.Address
     } });
 export const Submission = new MoveStruct({ name: `${$moduleName}::Submission`, fields: {

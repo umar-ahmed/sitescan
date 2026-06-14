@@ -19,6 +19,7 @@ import {
   type PresentationJSON,
 } from "./tlsn/harness";
 import { checkProvenance, notaryPemToKeyHex } from "../src/lib/tlsnotary";
+import { isEnsName, ensGatewayHost } from "../src/lib/ens";
 import {
   TESTNET_SCAN_MARKET_PACKAGE_ID,
   TESTNET_MARKET_ID,
@@ -103,8 +104,13 @@ async function verifyProof(
   }
   try {
     const verified = await tlsnHarness.verify(presentationJSON);
+    // ENS jobs are proven against the resolver gateway host (the page the node
+    // actually rendered), not the bare ".eth" name.
+    const expectedHost = isEnsName(jobUrl)
+      ? ensGatewayHost(jobUrl)
+      : new URL(jobUrl).hostname;
     const provenance = await checkProvenance(verified, {
-      expectedHost: new URL(jobUrl).hostname,
+      expectedHost,
       trustedNotaryKeyHex,
     });
     return {
