@@ -102,7 +102,7 @@ export function JobBoard() {
         </Card>
       ) : error ? (
         <Card>
-          <CardContent className="py-6 text-sm text-red-700">
+          <CardContent className="py-6 text-sm text-red-300">
             {(error as Error).message}
           </CardContent>
         </Card>
