@@ -356,23 +356,93 @@ let tlsnHarness: TlsnHarness | null = null;
 // presentation, or "" if proving failed/unavailable (e.g. TLS 1.3, unsupported
 // cipher). When TLSN is enabled the caller treats "" as a hard skip — there is
 // no non-proof submission path.
-const PROOF_TIMEOUT_MS = Number(process.env.TLSN_PROOF_TIMEOUT_MS ?? 90000);
+const PROOF_TIMEOUT_MS = Number(process.env.TLSN_PROOF_TIMEOUT_MS ?? 240000);
 // Max response bytes the prover buffers for the MPC transcript. Must exceed the
 // target's full HTTP response (e.g. example.com ~0.5KB, but many real pages are
 // 50KB+). Larger values cost more MPC time + memory, so it's tunable.
 const TLSN_MAX_RECV = Number(process.env.TLSN_MAX_RECV ?? 131072);
+// Head-only proving (backup for heavy pages): when > 0, the prover sends an HTTP
+// Range request for just the first N bytes, so MPC cost stays bounded and a
+// large page still proves in seconds. The full page is captured + stored on
+// Walrus regardless; the proof only attests provenance of the head. Provenance
+// accepts the resulting 206 Partial Content. 0 = adaptive (see below).
+const TLSN_HEAD_BYTES = Number(process.env.TLSN_HEAD_BYTES ?? 0);
+// Adaptive cap: when TLSN_HEAD_BYTES is 0, the node probes the raw response size
+// and proves the full body only if it's at or under this many bytes; larger
+// pages fall back to head-only proving of the first TLSN_FULL_MAX_BYTES bytes.
+// MPC cost scales with bytes, so big bodies (e.g. 55KB) blow past any timeout —
+// this keeps every proof bounded without manual flags.
+const TLSN_FULL_MAX_BYTES = Number(process.env.TLSN_FULL_MAX_BYTES ?? 32768);
+// Header headroom on top of the requested body bytes so the status line +
+// response headers also fit under maxRecvData.
+const TLSN_HEAD_HEADROOM = 8192;
+
+// Cheaply probe the raw HTTP body size without downloading it: a Range request
+// for one byte returns `Content-Range: bytes 0-0/<total>`; we cancel the body
+// stream immediately. Returns null if the size can't be determined.
+async function probeBodySize(
+  url: string,
+  creds: { cookies?: string; userAgent?: string },
+): Promise<number | null> {
+  try {
+    const headers: Record<string, string> = { Range: "bytes=0-0" };
+    if (creds.userAgent) headers["User-Agent"] = creds.userAgent;
+    if (creds.cookies) headers.Cookie = creds.cookies;
+    const res = await fetch(url, {
+      headers,
+      signal: AbortSignal.timeout(15000),
+    });
+    const range = res.headers.get("content-range");
+    const length = res.headers.get("content-length");
+    await res.body?.cancel().catch(() => undefined);
+    const total = range?.match(/\/(\d+)\s*$/)?.[1];
+    if (total) return Number(total);
+    if (length && res.status === 200) return Number(length);
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// Pick how many head bytes to notarize: an explicit TLSN_HEAD_BYTES forces
+// head-only; otherwise probe the size and only fall back to head-only when the
+// body exceeds the full-proof cap.
+async function resolveHeadBytes(
+  url: string,
+  creds: { cookies?: string; userAgent?: string },
+): Promise<number> {
+  if (TLSN_HEAD_BYTES > 0) return TLSN_HEAD_BYTES;
+  const size = await probeBodySize(url, creds);
+  if (size === null) {
+    console.log("  (couldn't probe page size — proving full response)");
+    return 0;
+  }
+  if (size > TLSN_FULL_MAX_BYTES) {
+    console.log(
+      `  page body is ${(size / 1024).toFixed(0)}KB (> ${(TLSN_FULL_MAX_BYTES / 1024).toFixed(0)}KB cap) — proving head-only`,
+    );
+    return TLSN_FULL_MAX_BYTES;
+  }
+  console.log(
+    `  page body is ${(size / 1024).toFixed(0)}KB — proving full response`,
+  );
+  return 0;
+}
 
 async function proveAndUpload(
   url: string,
   creds: { cookies?: string; userAgent?: string } = {},
 ): Promise<string> {
   if (!tlsnHarness) return "";
+  const headBytes = await resolveHeadBytes(url, creds);
+  const maxRecv =
+    headBytes > 0 ? headBytes + TLSN_HEAD_HEADROOM : TLSN_MAX_RECV;
   try {
     const { presentationJSON } = await tlsnHarness.prove(
       url,
-      TLSN_MAX_RECV,
+      maxRecv,
       PROOF_TIMEOUT_MS,
-      creds,
+      { ...creds, headBytes },
     );
     const proofBlob = await uploadToWalrus(JSON.stringify(presentationJSON), {
       publisher: WALRUS_PUBLISHER,
@@ -435,7 +505,13 @@ async function main() {
   if (TLSN_ENABLED) {
     tlsnHarness = new TlsnHarness({ notaryUrl: TLSN_NOTARY_URL });
     await tlsnHarness.start();
-    console.log(`TLSNotary proving ON · notary=${TLSN_NOTARY_URL}`);
+    console.log(
+      `TLSNotary proving ON · notary=${TLSN_NOTARY_URL} · ${
+        TLSN_HEAD_BYTES > 0
+          ? `head-only (${(TLSN_HEAD_BYTES / 1024).toFixed(0)}KB)`
+          : `adaptive (full ≤${(TLSN_FULL_MAX_BYTES / 1024).toFixed(0)}KB, else head-only)`
+      } · timeout=${Math.round(PROOF_TIMEOUT_MS / 1000)}s`,
+    );
   } else {
     console.log(
       "TLSNotary proving OFF (TLSN_ENABLED=0) — scans submitted without a proof will be rejected by the verifier.",
