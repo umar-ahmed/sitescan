@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCurrentClient, useDAppKit } from "@mysten/dapp-kit-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Transaction } from "@mysten/sui/transactions";
 import { postJob } from "./contracts/scan_market/scan_market";
 import { useScanConfig, suiToMist } from "./lib/config";
+import { isEnsName, resolveEnsUrl } from "./lib/ens";
 import { Button } from "./components/ui/button";
 import {
   Card,
@@ -27,12 +28,50 @@ export function PostJob() {
   const queryClient = useQueryClient();
   const { packageId, marketId } = useScanConfig();
 
-  const [url, setUrl] = useState("https://example.com");
+  const [input, setInput] = useState("https://example.com");
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+  const [ensLoading, setEnsLoading] = useState(false);
+  const [ensError, setEnsError] = useState<string | null>(null);
   const [geo, setGeo] = useState(GEOS[0]);
   const [device, setDevice] = useState(DEVICES[0]);
   const [browser, setBrowser] = useState(BROWSERS[0]);
   const [reward, setReward] = useState("0.05");
   const [scans, setScans] = useState("2");
+
+  // The actual URL to scan: resolved ENS url or direct input
+  const url = resolvedUrl ?? input;
+
+  // Resolve ENS name when input changes
+  useEffect(() => {
+    if (!isEnsName(input)) {
+      setResolvedUrl(null);
+      setEnsError(null);
+      return;
+    }
+    let cancelled = false;
+    setEnsLoading(true);
+    setEnsError(null);
+    setResolvedUrl(null);
+    resolveEnsUrl(input).then(
+      (result) => {
+        if (cancelled) return;
+        setEnsLoading(false);
+        if (result) {
+          setResolvedUrl(result);
+        } else {
+          setEnsError(`No URL record found for ${input}`);
+        }
+      },
+      (err) => {
+        if (cancelled) return;
+        setEnsLoading(false);
+        setEnsError(`Failed to resolve ENS name: ${(err as Error).message}`);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [input]);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -85,13 +124,24 @@ export function PostJob() {
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-1">
-          <label className="text-sm font-medium">Target URL</label>
+          <label className="text-sm font-medium">Target URL or ENS name</label>
           <input
             className={inputClass}
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://..."
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            placeholder="https://... or name.eth"
           />
+          {ensLoading && (
+            <p className="text-xs text-muted-foreground">Resolving ENS name…</p>
+          )}
+          {ensError && (
+            <p className="text-xs text-red-600">{ensError}</p>
+          )}
+          {resolvedUrl && (
+            <p className="text-xs text-green-700">
+              Resolved URL: {resolvedUrl}
+            </p>
+          )}
         </div>
 
         <div className="grid grid-cols-3 gap-3">
@@ -179,7 +229,7 @@ export function PostJob() {
           size="lg"
           className="w-full"
           loading={mutation.isPending}
-          disabled={!url || Number(reward) <= 0 || Number(scans) < 1}
+          disabled={!url || ensLoading || !!ensError || Number(reward) <= 0 || Number(scans) < 1}
           onClick={() => mutation.mutate()}
         >
           Escrow reward & post job
