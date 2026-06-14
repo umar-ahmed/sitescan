@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import * as THREE from "three";
 import Globe from "react-globe.gl";
 
 export interface GlobeRegion {
@@ -54,9 +55,9 @@ function regionForFeature(p: any): string | null {
 const COUNTRIES_URL =
   "https://raw.githubusercontent.com/nvkelso/natural-earth-vector/master/geojson/ne_110m_admin_0_countries.geojson";
 
-// Photoreal globe. When `interactive`, whole regions become clickable, hover-
-// highlighting polygons; pulsing rings encode node density; otherwise it slowly
-// auto-rotates as a background. `arcs` draws animated deployment beams.
+// Minimalist dark globe: flat near-black sphere, continents drawn as faint
+// outlines. Regions raise/brighten on hover + select; pulsing rings encode node
+// density. No photoreal texture, so it reads as a data surface, not a map.
 export default function GlobeScene({
   regions = [],
   selected = [],
@@ -77,6 +78,12 @@ export default function GlobeScene({
   const [hovered, setHovered] = useState<string | null>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [features, setFeatures] = useState<any[]>([]);
+
+  // Flat, unlit dark sphere — no bright patches to fight the text.
+  const globeMaterial = useMemo(
+    () => new THREE.MeshBasicMaterial({ color: "#0c0a22" }),
+    [],
+  );
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -121,7 +128,6 @@ export default function GlobeScene({
     g.pointOfView({ lat: 20, lng: 10, altitude: 2.5 }, 0);
   }, []);
 
-  // Cinematic camera: glide in when the picker becomes interactive.
   useEffect(() => {
     const g = globeRef.current;
     if (!g) return;
@@ -136,7 +142,6 @@ export default function GlobeScene({
         coverage: r.coverage ?? 0,
       }))
     : [];
-  const polygons = interactive ? features : [];
 
   return (
     <div ref={wrapRef} className="absolute inset-0">
@@ -145,44 +150,45 @@ export default function GlobeScene({
         width={dims.w}
         height={dims.h}
         backgroundColor="rgba(0,0,0,0)"
-        globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-        bumpImageUrl="//unpkg.com/three-globe/example/img/earth-topology.png"
-        backgroundImageUrl="//unpkg.com/three-globe/example/img/night-sky.png"
+        globeMaterial={globeMaterial}
         showAtmosphere
-        atmosphereColor="#8b9bff"
-        atmosphereAltitude={0.2}
-        polygonsData={polygons}
+        atmosphereColor="#6c7bd6"
+        atmosphereAltitude={0.16}
+        polygonsData={features}
         polygonAltitude={(f: object) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const reg = (f as any).__region;
-          if (reg === hovered) return 0.09;
-          if (selected.includes(reg)) return 0.06;
-          return 0.008;
+          if (interactive && reg === hovered) return 0.07;
+          if (selected.includes(reg)) return 0.05;
+          return 0.006;
         }}
         polygonCapColor={(f: object) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const reg = (f as any).__region;
-          if (selected.includes(reg)) return "rgba(124,73,183,0.6)";
-          if (reg === hovered) return "rgba(255,255,255,0.35)";
-          return "rgba(139,155,255,0.05)";
+          if (selected.includes(reg)) return "rgba(124,73,183,0.55)";
+          if (interactive && reg === hovered) return "rgba(255,255,255,0.3)";
+          return "rgba(150,160,235,0.06)";
         }}
-        polygonSideColor={() => "rgba(124,73,183,0.18)"}
+        polygonSideColor={() => "rgba(124,73,183,0.12)"}
         polygonStrokeColor={(f: object) => {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const reg = (f as any).__region;
-          return selected.includes(reg) || reg === hovered
-            ? "rgba(255,255,255,0.7)"
-            : "rgba(255,255,255,0.12)";
+          // No per-country borders by default — only outline the region you're
+          // hovering or have selected.
+          return selected.includes(reg) || (interactive && reg === hovered)
+            ? "rgba(255,255,255,0.75)"
+            : "rgba(255,255,255,0)";
         }}
         polygonsTransitionDuration={250}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         onPolygonHover={(f: any) => {
+          if (!interactive) return;
           setHovered(f ? f.__region : null);
           if (wrapRef.current)
             wrapRef.current.style.cursor = f ? "pointer" : "grab";
         }}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        onPolygonClick={(f: any) => f && onToggle?.(f.__region)}
+        onPolygonClick={(f: any) => interactive && f && onToggle?.(f.__region)}
         ringsData={rings}
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ringColor={(d: any) => (t: number) => coverageRGBA(d.coverage, 1 - t)}

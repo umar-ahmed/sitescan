@@ -235,6 +235,15 @@ export function ScanExperience() {
         transition={{ duration: 0.6, ease: "easeOut" }}
       />
 
+      {/* Vignette so headings always sit on a darker backing. */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            "radial-gradient(ellipse 75% 55% at 50% 40%, rgba(10,8,32,0.6) 0%, rgba(10,8,32,0.2) 45%, transparent 72%)",
+        }}
+      />
+
       <div className="pointer-events-none relative z-10 mx-auto flex min-h-[620px] max-w-3xl flex-col px-4 pt-5">
         <div className="pointer-events-auto self-center">
           <StepBar step={step} />
