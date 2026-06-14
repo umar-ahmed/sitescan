@@ -189,7 +189,7 @@ export function ScanGroup({ group }: { group: ScanGroupData }) {
           </div>
 
           {proofCount > 0 && (
-            <div className="rounded-md border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-900">
+            <div className="rounded-md border border-violet-400/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200">
               <span className="inline-flex items-center gap-1 font-medium">
                 <Lock className="h-3 w-3" /> TLSNotary provenance ·{" "}
                 {provenCount}/{proofCount} scan{proofCount > 1 ? "s" : ""}{" "}
@@ -383,7 +383,7 @@ function VantageBlock({
                 href={proofUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-0.5 text-violet-700 hover:underline"
+                className="inline-flex items-center gap-0.5 text-violet-300 hover:underline"
               >
                 <FileCheck2 className="h-3 w-3" /> TLS proof
               </a>
